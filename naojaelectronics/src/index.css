@@ -1,0 +1,23 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply antialiased;
+  }
+}
+
+@layer components {
+  .btn-primary {
+    @apply h-11 px-4 bg-brand-500 text-white font-semibold rounded-control inline-flex items-center justify-center gap-2.5 hover:bg-brand-600 transition-colors;
+  }
+
+  .btn-secondary {
+    @apply h-11 px-4 bg-white border border-brand-500 text-brand-500 font-semibold rounded-control inline-flex items-center justify-center gap-2.5 hover:bg-brand-50 transition-colors;
+  }
+}
