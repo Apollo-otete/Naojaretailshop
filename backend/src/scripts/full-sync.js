@@ -45,8 +45,8 @@ function exportSchema() {
             console.error(`❌ Export error: ${error.message}`);
             return;
         }
-        consolegit pull origin main--rebase
-            .log(`✅ Schema exported to VS Code!`);
+        // FIXED: This line was the main error
+        console.log(`✅ Schema exported to VS Code!`);
         console.log(`📁 Updated: ${SCHEMA_FILE}`);
     });
 }

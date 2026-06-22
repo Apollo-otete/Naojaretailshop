@@ -15,7 +15,7 @@ CREATE TABLE IF NOT EXISTS users (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- 2. CATEGORIES TABLE (Naoja's 23 categories)
+--          2. CATEGORIES TABLE (Naoja's 23 categories)
 CREATE TABLE IF NOT EXISTS categories (
     id SERIAL PRIMARY KEY,
     name VARCHAR(100) NOT NULL,
@@ -26,7 +26,7 @@ CREATE TABLE IF NOT EXISTS categories (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- 3. PRODUCTS TABLE
+--       3. PRODUCTS TABLE
 CREATE TABLE IF NOT EXISTS products (
     id SERIAL PRIMARY KEY,
     name VARCHAR(255) NOT NULL,
@@ -47,7 +47,7 @@ CREATE TABLE IF NOT EXISTS products (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- 4. ORDERS TABLE
+--       4. ORDERS TABLE
 CREATE TABLE IF NOT EXISTS orders (
     id SERIAL PRIMARY KEY,
     order_ref VARCHAR(50) UNIQUE NOT NULL,
@@ -68,7 +68,7 @@ CREATE TABLE IF NOT EXISTS orders (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- 5. ORDER ITEMS TABLE
+--        5. ORDER ITEMS TABLE
 CREATE TABLE IF NOT EXISTS order_items (
     id SERIAL PRIMARY KEY,
     order_id INTEGER REFERENCES orders(id) ON DELETE CASCADE,
@@ -80,7 +80,7 @@ CREATE TABLE IF NOT EXISTS order_items (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- 6. REVIEWS TABLE
+--         6. REVIEWS TABLE
 CREATE TABLE IF NOT EXISTS reviews (
     id SERIAL PRIMARY KEY,
     product_id INTEGER REFERENCES products(id) ON DELETE CASCADE,
@@ -93,7 +93,7 @@ CREATE TABLE IF NOT EXISTS reviews (
     approved_at TIMESTAMP
 );
 
--- 7. NEWSLETTER SUBSCRIBERS
+--          7. NEWSLETTER SUBSCRIBERS
 CREATE TABLE IF NOT EXISTS subscribers (
     id SERIAL PRIMARY KEY,
     name VARCHAR(100) NOT NULL,
@@ -102,7 +102,7 @@ CREATE TABLE IF NOT EXISTS subscribers (
     subscribed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- 8. CONTACT MESSAGES
+--          8. CONTACT MESSAGES
 CREATE TABLE IF NOT EXISTS contact_messages (
     id SERIAL PRIMARY KEY,
     name VARCHAR(100) NOT NULL,
@@ -113,7 +113,7 @@ CREATE TABLE IF NOT EXISTS contact_messages (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- 9. CART (for guest users)
+--         9. CART (for guest users)
 CREATE TABLE IF NOT EXISTS cart (
     id SERIAL PRIMARY KEY,
     session_id VARCHAR(255),
@@ -122,7 +122,7 @@ CREATE TABLE IF NOT EXISTS cart (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- 10. CART ITEMS
+--         10. CART ITEMS
 CREATE TABLE IF NOT EXISTS cart_items (
     id SERIAL PRIMARY KEY,
     cart_id INTEGER REFERENCES cart(id) ON DELETE CASCADE,
@@ -131,9 +131,9 @@ CREATE TABLE IF NOT EXISTS cart_items (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- ============================================
--- TRIGGERS FOR UPDATED_AT
--- ============================================
+
+--        11. TRIGGERS FOR UPDATED_AT/////
+
 CREATE OR REPLACE FUNCTION update_updated_at_column()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -151,9 +151,8 @@ CREATE TRIGGER update_products_updated_at BEFORE UPDATE ON products
 CREATE TRIGGER update_orders_updated_at BEFORE UPDATE ON orders
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
--- ============================================
--- SEED DATA FOR NAOJA VENTURES
--- ============================================
+
+--       12.  SEED DATA FOR NAOJA VENTURES////
 
 -- Insert Categories (23 categories as per Naoja Ventures)
 INSERT INTO categories (name, slug, icon) VALUES
