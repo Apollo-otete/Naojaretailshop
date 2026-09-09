@@ -24,7 +24,10 @@ import {
   Eye,
   CheckCircle,
   XCircle,
-  Menu
+  Menu,
+  Upload,
+  ImageIcon,
+  LogOut
 } from 'lucide-react';
 
 export default function AdminDashboard() {
@@ -48,6 +51,7 @@ export default function AdminDashboard() {
   
   const [loading, setLoading] = useState(true);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [uploadingImage, setUploadingImage] = useState(false);
 
   // Search & Filter States
   const [prodSearch, setProdSearch] = useState('');
@@ -72,7 +76,8 @@ export default function AdminDashboard() {
     stock_quantity: '',
     category_id: '',
     subcategory: '',
-    image_url: ''
+    image_url: '',
+    image_preview: ''
   });
 
   // Form States - Category
@@ -155,7 +160,8 @@ export default function AdminDashboard() {
         stock_quantity: prod.stock_quantity,
         category_id: prod.category_id || '',
         subcategory: prod.subcategory || '',
-        image_url: prod.images && prod.images[0] ? prod.images[0] : ''
+        image_url: prod.images && prod.images[0] ? prod.images[0] : '',
+        image_preview: prod.images && prod.images[0] ? prod.images[0] : ''
       });
     } else {
       setEditingProduct(null);
@@ -167,7 +173,8 @@ export default function AdminDashboard() {
         stock_quantity: '',
         category_id: categories.length > 0 ? categories[0].id : '',
         subcategory: '',
-        image_url: ''
+        image_url: '',
+        image_preview: ''
       });
     }
     setIsProductModalOpen(true);
@@ -330,6 +337,33 @@ export default function AdminDashboard() {
     refreshAnalytics(products, orders, subscribers, updatedMessages);
   };
 
+  // Handle logout
+  const handleLogout = () => {
+    localStorage.removeItem('adminToken');
+    localStorage.removeItem('adminInfo');
+    window.location.href = '/admin/login';
+  };
+
+  // Handle image file upload
+  const handleImageFileChange = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    // Show local preview immediately
+    const localPreview = URL.createObjectURL(file);
+    setProductForm(prev => ({ ...prev, image_preview: localPreview }));
+    setUploadingImage(true);
+    try {
+      const res = await api.uploadImage(file);
+      setProductForm(prev => ({ ...prev, image_url: res.url, image_preview: res.url }));
+    } catch (err) {
+      // Backend offline – keep local preview URL as fallback
+      setProductForm(prev => ({ ...prev, image_url: localPreview }));
+      console.warn('Upload to server failed, using local blob URL as fallback.');
+    } finally {
+      setUploadingImage(false);
+    }
+  };
+
   // Sidebar Menu Items
   const menuItems = [
     { id: 'overview', label: 'Overview', icon: LayoutDashboard },
@@ -416,8 +450,15 @@ export default function AdminDashboard() {
             })}
           </div>
 
-          <div className="px-4 text-[10px] text-gray-400 font-semibold tracking-wider uppercase">
-            Kakamega Shop Operations
+          <div className="px-3 space-y-1">
+            <div className="px-4 pb-2 text-[10px] text-gray-400 font-semibold tracking-wider uppercase">Shop Operations</div>
+            <button
+              onClick={handleLogout}
+              className="w-full h-10 px-4 rounded-xl flex items-center gap-3 font-semibold text-sm text-red-500 hover:bg-red-50 transition-all"
+            >
+              <LogOut className="w-4.5 h-4.5" />
+              Logout
+            </button>
           </div>
         </aside>
 
@@ -1310,13 +1351,55 @@ export default function AdminDashboard() {
                 </div>
 
                 <div className="col-span-2">
-                  <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1.5">Image URL</label>
+                  <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1.5">Product Image</label>
+                  <div className="border-2 border-dashed border-gray-200 rounded-xl overflow-hidden">
+                    {/* Preview Area */}
+                    {productForm.image_preview ? (
+                      <div className="relative group">
+                        <img
+                          src={productForm.image_preview}
+                          alt="Product preview"
+                          className="w-full h-40 object-cover"
+                        />
+                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                          <label htmlFor="product-image-upload" className="cursor-pointer bg-white text-gray-800 text-xs font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5">
+                            <Upload className="w-3.5 h-3.5" /> Change Image
+                          </label>
+                        </div>
+                        {uploadingImage && (
+                          <div className="absolute inset-0 bg-white/80 flex items-center justify-center">
+                            <span className="text-xs font-semibold text-brand-600 animate-pulse">Uploading...</span>
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <label htmlFor="product-image-upload" className="flex flex-col items-center justify-center h-32 cursor-pointer hover:bg-gray-50 transition-colors">
+                        {uploadingImage ? (
+                          <span className="text-xs font-semibold text-brand-600 animate-pulse">Uploading...</span>
+                        ) : (
+                          <>
+                            <ImageIcon className="w-8 h-8 text-gray-300 mb-2" />
+                            <span className="text-xs font-semibold text-gray-500">Click to upload image</span>
+                            <span className="text-[10px] text-gray-400 mt-0.5">JPG, PNG, WEBP up to 10MB</span>
+                          </>
+                        )}
+                      </label>
+                    )}
+                    <input
+                      id="product-image-upload"
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={handleImageFileChange}
+                    />
+                  </div>
+                  {/* Also allow pasting a URL manually */}
                   <input
                     type="url"
                     value={productForm.image_url}
-                    onChange={(e) => setProductForm({ ...productForm, image_url: e.target.value })}
-                    placeholder="https://images.unsplash.com/photo-..."
-                    className="w-full h-11 border border-gray-200 rounded-xl px-3.5 text-xs focus:border-brand-500 outline-none"
+                    onChange={(e) => setProductForm({ ...productForm, image_url: e.target.value, image_preview: e.target.value })}
+                    placeholder="Or paste image URL…"
+                    className="mt-2 w-full h-9 border border-gray-200 rounded-xl px-3 text-[11px] focus:border-brand-500 outline-none text-gray-500"
                   />
                 </div>
 

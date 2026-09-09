@@ -696,6 +696,17 @@ function handleLocalFallback(endpoint, options = {}) {
     return { url: 'https://images.unsplash.com/photo-1609592424085-f509e51c8680?w=600' };
   }
 
+  // Auth Fallback
+  if (endpoint.startsWith('/api/auth/login') && method === 'POST') {
+    if (body.email === 'admin@naojaventures.com' && body.password === 'admin123') {
+      return {
+        token: 'mock_jwt_token_123456789',
+        admin: { id: 1, name: 'Super Admin', email: 'admin@naojaventures.com' }
+      };
+    }
+    throw new Error('Invalid credentials');
+  }
+
   // 7. ANALYTICS ENDPOINT
   if (endpoint.startsWith('/api/analytics') && method === 'GET') {
     const totalSales = db.orders
@@ -732,8 +743,10 @@ function handleLocalFallback(endpoint, options = {}) {
 
 async function request(endpoint, options = {}) {
   const url = `${BASE_URL}${endpoint}`;
+  const token = localStorage.getItem('adminToken');
   const headers = {
     'Content-Type': 'application/json',
+    ...(token && { 'Authorization': `Bearer ${token}` }),
     ...options.headers,
   };
 
@@ -840,6 +853,8 @@ export const api = {
 
   // Admin Portal endpoints
   admin: {
+    login: (credentials) => request('/api/auth/login', { method: 'POST', body: credentials }),
+    
     // Products CRUD
     getProducts: () => request('/api/products?admin=true'),
     addProduct: (product) => request('/api/products', { method: 'POST', body: product }),
