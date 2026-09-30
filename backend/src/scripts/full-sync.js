@@ -3,9 +3,12 @@ const chokidar = require('chokidar');
 const fs = require('fs');
 const path = require('path');
 
-const DB_NAME = 'Naojaretail';
-const DB_USER = 'postgres';
-const DB_PASSWORD = 'bagy9541';
+require('dotenv').config({ path: path.join(__dirname, '../../.env') });
+
+const DB_NAME = process.env.PG_DATABASE || 'naoja_shop';
+const DB_USER = process.env.PG_USER || 'postgres';
+const DB_PASSWORD = process.env.PG_PASSWORD || '';
+const DB_HOST = process.env.PG_HOST || 'localhost';
 const SCHEMA_FILE = path.join(__dirname, '../migrations/naoja_schema.sql');
 
 console.log('🔄 Two-Way Sync Started!');
@@ -22,7 +25,7 @@ watcher.on('change', (filePath) => {
     console.log(`📝 VS Code change detected!`);
     console.log(`🔄 Syncing to PostgreSQL...`);
 
-    const command = `PGPASSWORD=${DB_PASSWORD} psql -d ${DB_NAME} -U ${DB_USER} -h localhost -f "${filePath}"`;
+    const command = `PGPASSWORD="${DB_PASSWORD}" psql -d "${DB_NAME}" -U "${DB_USER}" -h "${DB_HOST}" -f "${filePath}"`;
 
     exec(command, (error, stdout, stderr) => {
         if (error) {
@@ -38,7 +41,7 @@ watcher.on('change', (filePath) => {
 function exportSchema() {
     console.log(`🔄 Exporting schema from PostgreSQL...`);
 
-    const command = `PGPASSWORD=${DB_PASSWORD} pg_dump -s -h localhost -U ${DB_USER} -d ${DB_NAME} > ${SCHEMA_FILE}`;
+    const command = `PGPASSWORD="${DB_PASSWORD}" pg_dump -s -h "${DB_HOST}" -U "${DB_USER}" -d "${DB_NAME}" > "${SCHEMA_FILE}"`;
 
     exec(command, (error, stdout, stderr) => {
         if (error) {

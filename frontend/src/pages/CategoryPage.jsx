@@ -5,15 +5,30 @@ import ProductCard from '../components/ProductCard';
 import { api } from '../lib/api';
 
 const CATEGORY_NAMES = {
-  phones: 'Phones',
-  'laptops-computers': 'Laptops & Computers',
-  'tvs-displays': 'TVs & Displays',
-  audio: 'Audio',
-  solar: 'Solar',
+  // Official Naoja Store Categories
+  'mobile-phones': 'Mobile Phones',
+  'audio-devices': 'Audio Devices',
+  'television-products': 'Television Products',
+  'charging-accessories': 'Charging Accessories',
+  'computers-accessories': 'Computers & Accessories',
+  'electrical-products': 'Electrical Products',
+  'security-products': 'Security Products',
+  'networking-products': 'Networking Products',
+  'automotive-products': 'Automotive Products',
+  'gaming-products': 'Gaming Products',
+  watches: 'Watches',
+  'renewable-energy': 'Renewable Energy',
   'home-appliances': 'Home Appliances',
-  'electrical-installation': 'Electrical Installation Accessories',
-  'gaming-devices': 'Gaming Devices',
-  accessories: 'Accessories',
+  'other-electrical': 'Other Electrical Products',
+  // Short URL aliases
+  phones: 'Mobile Phones',
+  'laptops-computers': 'Computers & Accessories',
+  'tvs-displays': 'Television Products',
+  audio: 'Audio Devices',
+  solar: 'Renewable Energy',
+  'electrical-installation': 'Electrical Products',
+  'gaming-devices': 'Gaming Products',
+  accessories: 'Charging Accessories',
 };
 
 export default function CategoryPage() {

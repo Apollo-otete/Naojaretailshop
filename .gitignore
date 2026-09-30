@@ -1,28 +1,57 @@
-# Dependency directories
+# ─────────────────────────────────────────────────────────────
+#  Naoja Retail Shop — .gitignore
+# ─────────────────────────────────────────────────────────────
+
+# ── Dependencies ──────────────────────────────────────────────
 node_modules/
 jspm_packages/
 
-# Build outputs
+# ── Build Outputs ─────────────────────────────────────────────
 dist/
-tmp/
-out/
 build/
+out/
+tmp/
+*.tsbuildinfo
 
-# Local env files
+# ── Environment & Secrets (NEVER commit these) ────────────────
 .env
 .env.local
+.env.development
 .env.development.local
+.env.test
 .env.test.local
+.env.production
 .env.production.local
+backend/.env
+frontend/.env
 
-# Logs
+# ── Uploaded Product Images (binary files, can be large) ──────
+backend/uploads/*
+!backend/uploads/.gitkeep
+
+# ── PM2 Process Manager Logs ─────────────────────────────────
+.pm2/
+logs/
+*.pm2
+
+# ── npm / yarn Logs ───────────────────────────────────────────
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
+*.log
 
-# Editor directories and files
+# ── OS-generated Files ────────────────────────────────────────
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# ── Editor & IDE Files ────────────────────────────────────────
 .idea/
 .vscode/
 *.suo
@@ -30,11 +59,11 @@ lerna-debug.log*
 *.njsproj
 *.sln
 *.sw?
+*.swp
 
-# OS files
-.DS_Store
-Thumbs.db
+# ── Test & Coverage ───────────────────────────────────────────
+coverage/
+.nyc_output/
 
-# Backend runtime files
-server/uploads/*
-!server/uploads/.gitkeep
+# ── Docker (local only — docker-compose.override is personal) ─
+docker-compose.override.yml

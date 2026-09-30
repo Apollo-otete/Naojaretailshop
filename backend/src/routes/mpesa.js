@@ -84,6 +84,20 @@ router.post('/stkpush', async (req, res) => {
       return res.status(400).json({ message: stkData.CustomerMessage || 'STK Push failed', raw: stkData });
     }
 
+    // Associate checkoutRequestId with the order in PostgreSQL
+    if (orderRef || orderId) {
+      try {
+        await pgPool.query(
+          `UPDATE orders 
+           SET mpesa_checkout_request_id = $1 
+           WHERE order_ref = $2 OR id = $3`,
+          [stkData.CheckoutRequestID, orderRef || '', parseInt(orderId, 10) || 0]
+        );
+      } catch (dbErr) {
+        console.warn('⚠️ Could not attach checkoutRequestId to order in DB:', dbErr.message);
+      }
+    }
+
     res.json({
       success: true,
       message: 'STK Push sent! Ask the customer to check their phone.',
@@ -110,7 +124,7 @@ router.post('/callback', async (req, res) => {
     const resultDesc = stkCallback.ResultDesc;
     const checkoutRequestId = stkCallback.CheckoutRequestID;
 
-    console.log(`📲 M-Pesa Callback — ResultCode: ${resultCode} | ${resultDesc}`);
+    console.log(`📲 M-Pesa Callback — ResultCode: ${resultCode} | ${resultDesc} | ReqID: ${checkoutRequestId}`);
 
     if (resultCode === 0) {
       // Payment was successful
@@ -123,22 +137,55 @@ router.post('/callback', async (req, res) => {
 
       console.log(`✅ Payment successful — Code: ${mpesaCode}, Amount: ${amountPaid}, Phone: ${phoneUsed}`);
 
-      // Update the corresponding order to paid
-      // We match by the pending order with a stored checkoutRequestId or by phone
-      // For simplicity, we update the most recent pending order for that phone
       if (mpesaCode) {
-        await pgPool.query(
-          `UPDATE orders 
-           SET payment_status = 'paid', mpesa_transaction_id = $1
-           WHERE payment_status = 'pending'
-             AND customer_phone LIKE $2
-           ORDER BY created_at DESC
-           LIMIT 1`,
-          [mpesaCode, `%${String(phoneUsed).slice(-9)}`]
-        );
+        // 1. Primary match: Match order by unique CheckoutRequestID
+        let updated = false;
+        if (checkoutRequestId) {
+          const result = await pgPool.query(
+            `UPDATE orders 
+             SET payment_status = 'paid', 
+                 mpesa_transaction_id = $1,
+                 status = CASE WHEN status = 'pending' THEN 'confirmed' ELSE status END
+             WHERE mpesa_checkout_request_id = $2
+             RETURNING id, order_ref`,
+            [mpesaCode, checkoutRequestId]
+          );
+          if (result.rowCount > 0) {
+            updated = true;
+            console.log(`🎯 Order ${result.rows[0].order_ref} marked paid via CheckoutRequestID.`);
+          }
+        }
+
+        // 2. Secondary fallback: Match most recent pending order for that phone
+        if (!updated && phoneUsed) {
+          const fallbackResult = await pgPool.query(
+            `UPDATE orders 
+             SET payment_status = 'paid', 
+                 mpesa_transaction_id = $1,
+                 status = CASE WHEN status = 'pending' THEN 'confirmed' ELSE status END
+             WHERE payment_status = 'pending'
+               AND customer_phone LIKE $2
+             ORDER BY created_at DESC
+             LIMIT 1
+             RETURNING id, order_ref`,
+            [mpesaCode, `%${String(phoneUsed).slice(-9)}`]
+          );
+          if (fallbackResult.rowCount > 0) {
+            console.log(`🎯 Order ${fallbackResult.rows[0].order_ref} marked paid via phone match fallback.`);
+          }
+        }
       }
     } else {
-      console.warn(`❌ M-Pesa payment failed — ${resultDesc}`);
+      console.warn(`❌ M-Pesa payment failed — ${resultDesc} (ResultCode: ${resultCode})`);
+      // Update order to failed if customer cancelled or failed
+      if (checkoutRequestId) {
+        await pgPool.query(
+          `UPDATE orders 
+           SET payment_status = 'failed'
+           WHERE mpesa_checkout_request_id = $1 AND payment_status = 'pending'`,
+          [checkoutRequestId]
+        );
+      }
     }
 
     // Always respond 200 to Safaricom so they stop retrying
@@ -174,12 +221,53 @@ router.post('/query', async (req, res) => {
     });
 
     const data = await queryRes.json();
-    // ResultCode 0 = success, 1032 = cancelled, 1 = failed
+    const isPaid = data.ResultCode === '0';
+
+    // If query confirms payment, update database proactively
+    if (isPaid && checkoutRequestId) {
+      await pgPool.query(
+        `UPDATE orders 
+         SET payment_status = 'paid',
+             status = CASE WHEN status = 'pending' THEN 'confirmed' ELSE status END
+         WHERE mpesa_checkout_request_id = $1 AND payment_status = 'pending'`,
+        [checkoutRequestId]
+      );
+    } else if (data.ResultCode && data.ResultCode !== '0' && data.ResultCode !== '1037') {
+      // 1037 is timeout / in-progress; other codes mean failed or cancelled
+      await pgPool.query(
+        `UPDATE orders 
+         SET payment_status = 'failed'
+         WHERE mpesa_checkout_request_id = $1 AND payment_status = 'pending'`,
+        [checkoutRequestId]
+      );
+    }
+
     res.json({
       resultCode: data.ResultCode,
       resultDesc: data.ResultDesc,
-      paid: data.ResultCode === '0',
+      paid: isPaid,
     });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// ─── GET /api/mpesa/order-status/:orderRef ────────────────────────────────────
+// Lightweight status polling endpoint for frontend order verification
+router.get('/order-status/:orderRef', async (req, res) => {
+  try {
+    const { orderRef } = req.params;
+    const { rows } = await pgPool.query(
+      `SELECT id, order_ref, status, payment_status, mpesa_transaction_id, total_amount, created_at 
+       FROM orders WHERE order_ref = $1`,
+      [orderRef]
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({ message: 'Order not found' });
+    }
+
+    res.json(rows[0]);
   } catch (err) {
     res.status(500).json({ message: err.message });
   }

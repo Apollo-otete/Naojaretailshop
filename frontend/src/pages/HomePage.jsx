@@ -7,12 +7,14 @@ import { api } from '../lib/api';
 import { Star, Phone, MessageSquare, Shield, CheckCircle, Tag, Truck } from 'lucide-react';
 
 const DEFAULT_CATEGORIES = [
-  { id: '1', name: 'Phones', slug: 'phones', description: 'Smartphones & accessories', image_url: '', product_count: 45 },
-  { id: '2', name: 'Laptops & Computers', slug: 'laptops-computers', description: 'Work & gaming', image_url: '', product_count: 32 },
-  { id: '3', name: 'TVs & Displays', slug: 'tvs-displays', description: '4K, smart TVs', image_url: '', product_count: 28 },
-  { id: '4', name: 'Audio', slug: 'audio', description: 'Speakers & earphones', image_url: '', product_count: 56 },
-  { id: '5', name: 'Solar', slug: 'solar', description: 'Panels, inverters', image_url: '', product_count: 24 },
-  { id: '6', name: 'Home Appliances', slug: 'home-appliances', description: 'Kitchen & home', image_url: '', product_count: 41 },
+  { id: 1, name: 'Mobile Phones', slug: 'mobile-phones', description: 'Smartphones & accessories', icon: '📱', product_count: 3 },
+  { id: 2, name: 'Audio Devices', slug: 'audio-devices', description: 'Speakers & headphones', icon: '🎧', product_count: 2 },
+  { id: 3, name: 'Television Products', slug: 'television-products', description: 'Smart TVs & displays', icon: '📺', product_count: 1 },
+  { id: 4, name: 'Charging Accessories', slug: 'charging-accessories', description: 'Fast chargers & cables', icon: '🔌', product_count: 1 },
+  { id: 5, name: 'Computers & Accessories', slug: 'computers-accessories', description: 'Laptops & peripherals', icon: '💻', product_count: 1 },
+  { id: 6, name: 'Electrical Products', slug: 'electrical-products', description: 'Switches, sockets & wiring', icon: '⚡', product_count: 1 },
+  { id: 7, name: 'Security Products', slug: 'security-products', description: 'CCTV & alarms', icon: '🔒', product_count: 1 },
+  { id: 8, name: 'Renewable Energy', slug: 'renewable-energy', description: 'Solar panels & batteries', icon: '☀️', product_count: 1 },
 ];
 
 export default function HomePage() {

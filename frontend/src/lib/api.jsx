@@ -1,7 +1,7 @@
 // Client API service to communicate with the Node.js Express backend.
 // Falls back to a local storage database if the server is offline or unavailable.
 
-const BASE_URL = '';
+const BASE_URL = import.meta.env.VITE_API_URL || '';
 
 // Default Mock Data for Kakamega Naoja Ventures Retail Shop
 const DEFAULT_CATEGORIES = [
@@ -811,6 +811,19 @@ export const api = {
       method: 'POST',
       body: orderData,
     });
+  },
+
+  // Public Order Tracking
+  trackOrder: (ref, phone) => {
+    const params = new URLSearchParams({ ref, phone });
+    return request(`/api/orders/track?${params.toString()}`);
+  },
+
+  // M-Pesa Integration Endpoints
+  mpesa: {
+    stkPush: (data) => request('/api/mpesa/stkpush', { method: 'POST', body: data }),
+    query: (checkoutRequestId) => request('/api/mpesa/query', { method: 'POST', body: { checkoutRequestId } }),
+    getOrderStatus: (orderRef) => request(`/api/mpesa/order-status/${encodeURIComponent(orderRef)}`),
   },
 
   // Reviews

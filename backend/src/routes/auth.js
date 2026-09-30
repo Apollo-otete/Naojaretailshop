@@ -24,9 +24,15 @@ router.post('/login', async (req, res) => {
       return res.status(400).json({ message: 'Invalid credentials' });
     }
 
+    const jwtSecret = process.env.JWT_SECRET || (process.env.NODE_ENV === 'production' ? null : 'fallback_dev_secret_key_123');
+    if (!jwtSecret) {
+      console.error('CRITICAL: JWT_SECRET environment variable must be set in production!');
+      return res.status(500).json({ message: 'Server configuration error' });
+    }
+
     const token = jwt.sign(
       { id: admin.id, email: admin.email, name: admin.name },
-      process.env.JWT_SECRET || 'fallback_secret_key_123',
+      jwtSecret,
       { expiresIn: '1d' }
     );
 

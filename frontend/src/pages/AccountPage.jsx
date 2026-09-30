@@ -15,6 +15,13 @@ export default function AccountPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const activeTab = searchParams.get('tab') || 'orders';
 
+  // Tracking state
+  const [trackRef, setTrackRef] = useState(searchParams.get('ref') || '');
+  const [trackPhone, setTrackPhone] = useState(searchParams.get('phone') || '');
+  const [trackedOrder, setTrackedOrder] = useState(null);
+  const [trackLoading, setTrackLoading] = useState(false);
+  const [trackError, setTrackError] = useState('');
+
   // Contact form state
   const [contactName, setContactName] = useState('');
   const [contactEmail, setContactEmail] = useState('');
@@ -25,6 +32,35 @@ export default function AccountPage() {
   const setTab = (tab) => {
     setSearchParams({ tab });
   };
+
+  const handleTrackSubmit = async (e) => {
+    if (e) e.preventDefault();
+    if (!trackRef || !trackPhone) return;
+    setTrackLoading(true);
+    setTrackError('');
+    try {
+      const order = await api.trackOrder(trackRef.trim(), trackPhone.trim());
+      setTrackedOrder(order);
+    } catch (err) {
+      setTrackError(err.message || 'Order not found. Please verify the reference and phone number.');
+      setTrackedOrder(null);
+    } finally {
+      setTrackLoading(false);
+    }
+  };
+
+  // Auto-search if ref and phone are in URL
+  useEffect(() => {
+    const urlRef = searchParams.get('ref');
+    const urlPhone = searchParams.get('phone');
+    if (urlRef && urlPhone) {
+      setTrackRef(urlRef);
+      setTrackPhone(urlPhone);
+      api.trackOrder(urlRef.trim(), urlPhone.trim())
+        .then((order) => setTrackedOrder(order))
+        .catch(() => {});
+    }
+  }, [searchParams]);
 
   const handleContactSubmit = async (e) => {
     e.preventDefault();
@@ -88,17 +124,130 @@ export default function AccountPage() {
             {activeTab === 'orders' && (
               <section className="space-y-6">
                 <div className="border-b border-gray-100 pb-4">
-                  <h2 className="font-serif text-3xl font-bold text-gray-900">Track Orders</h2>
-                  <p className="text-xs text-gray-400 mt-1">Review the status of your current and past orders.</p>
+                  <h2 className="font-serif text-3xl font-bold text-gray-900">Track Your Order</h2>
+                  <p className="text-xs text-gray-400 mt-1">Enter your Order Reference and Phone Number to check real-time status.</p>
                 </div>
-                <div className="bg-surface rounded-card p-12 text-center border border-gray-200">
-                  <Package className="w-14 h-14 text-gray-300 mx-auto mb-4" />
-                  <p className="text-gray-500 text-sm">You have no active orders placed under this session.</p>
-                  <p className="text-xs text-gray-400 mt-1.5">For enquiries regarding an M-Pesa order, please call us directly.</p>
-                  <Link to="/" className="btn-secondary inline-flex mt-6 text-sm">
-                    Start Shopping
-                  </Link>
-                </div>
+
+                {/* Tracking Search Form */}
+                <form onSubmit={handleTrackSubmit} className="bg-surface p-4 sm:p-5 rounded-2xl border border-gray-200">
+                  <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-end">
+                    <div className="sm:col-span-5">
+                      <label className="text-[11px] font-bold uppercase tracking-wider text-gray-500 block mb-1">
+                        Order Reference #
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        placeholder="e.g., NJ-2026-0001"
+                        value={trackRef}
+                        onChange={(e) => setTrackRef(e.target.value.toUpperCase())}
+                        className="w-full h-11 border border-gray-200 bg-white rounded-xl px-3.5 text-sm font-mono uppercase focus:border-brand-500 outline-none"
+                      />
+                    </div>
+                    <div className="sm:col-span-4">
+                      <label className="text-[11px] font-bold uppercase tracking-wider text-gray-500 block mb-1">
+                        Phone Number
+                      </label>
+                      <input
+                        type="tel"
+                        required
+                        placeholder="e.g., 0712345678"
+                        value={trackPhone}
+                        onChange={(e) => setTrackPhone(e.target.value)}
+                        className="w-full h-11 border border-gray-200 bg-white rounded-xl px-3.5 text-sm focus:border-brand-500 outline-none"
+                      />
+                    </div>
+                    <div className="sm:col-span-3">
+                      <button
+                        type="submit"
+                        disabled={trackLoading}
+                        className="btn-primary w-full h-11 flex items-center justify-center gap-2 text-sm cursor-pointer"
+                      >
+                        {trackLoading ? 'Searching...' : 'Track Order'}
+                      </button>
+                    </div>
+                  </div>
+                  {trackError && (
+                    <p className="text-xs text-red-600 font-medium mt-3 bg-red-50 p-2.5 rounded-lg border border-red-200">
+                      {trackError}
+                    </p>
+                  )}
+                </form>
+
+                {/* Tracked Order Result Card */}
+                {trackedOrder ? (
+                  <div className="bg-white border border-gray-200 rounded-2xl p-5 sm:p-6 shadow-sm space-y-5">
+                    <div className="flex flex-wrap items-center justify-between pb-4 border-b border-gray-100 gap-2">
+                      <div>
+                        <span className="text-[11px] font-bold uppercase text-gray-400">Order Reference</span>
+                        <h3 className="font-mono text-xl font-bold text-gray-900">{trackedOrder.order_ref}</h3>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className={`px-2.5 py-1 rounded-full text-xs font-bold uppercase ${
+                          trackedOrder.status === 'delivered' ? 'bg-green-100 text-green-800' :
+                          trackedOrder.status === 'shipped' ? 'bg-blue-100 text-blue-800' :
+                          trackedOrder.status === 'confirmed' ? 'bg-brand-100 text-brand-800' :
+                          trackedOrder.status === 'cancelled' ? 'bg-red-100 text-red-800' :
+                          'bg-yellow-100 text-yellow-800'
+                        }`}>
+                          Status: {trackedOrder.status}
+                        </span>
+                        <span className={`px-2.5 py-1 rounded-full text-xs font-bold uppercase ${
+                          trackedOrder.payment_status === 'paid' ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'
+                        }`}>
+                          Payment: {trackedOrder.payment_status}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs">
+                      <div>
+                        <span className="text-gray-400 block mb-0.5">Customer Name</span>
+                        <strong className="text-gray-800">{trackedOrder.customer_name}</strong>
+                      </div>
+                      <div>
+                        <span className="text-gray-400 block mb-0.5">Destination / Fulfillment</span>
+                        <strong className="text-gray-800">{trackedOrder.shipping_address || 'Store Pickup'}</strong>
+                      </div>
+                      <div>
+                        <span className="text-gray-400 block mb-0.5">Order Date</span>
+                        <strong className="text-gray-800">{new Date(trackedOrder.created_at).toLocaleDateString()}</strong>
+                      </div>
+                    </div>
+
+                    {/* Items table */}
+                    {trackedOrder.items && (
+                      <div className="border border-gray-100 rounded-xl overflow-hidden">
+                        <div className="bg-surface px-4 py-2 text-[10px] font-bold uppercase text-gray-500">Ordered Items</div>
+                        <div className="divide-y divide-gray-100 text-xs">
+                          {(typeof trackedOrder.items === 'string' ? JSON.parse(trackedOrder.items) : trackedOrder.items).map((item, idx) => (
+                            <div key={idx} className="p-3 flex justify-between items-center">
+                              <span>{item.product_name || item.name} × {item.quantity}</span>
+                              <strong className="text-gray-900">KSh {(item.unit_price * item.quantity || item.total_price || 0).toLocaleString()}</strong>
+                            </div>
+                          ))}
+                        </div>
+                        <div className="bg-surface px-4 py-3 flex justify-between items-center border-t border-gray-100 text-sm">
+                          <strong className="text-gray-700">Total</strong>
+                          <strong className="text-brand-600 font-extrabold text-base">KSh {parseFloat(trackedOrder.total_amount).toLocaleString()}</strong>
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 text-xs text-blue-800 space-y-1">
+                      <p className="font-bold">Need assistance with your delivery?</p>
+                      <p>Our Lurambi shop helpline is open Sunday–Thursday (8:30am–8:00pm) and Friday (8:30am–3:00pm). Call us at <strong>0704812343</strong>.</p>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="bg-surface rounded-card p-12 text-center border border-gray-200">
+                    <Package className="w-14 h-14 text-gray-300 mx-auto mb-4" />
+                    <p className="text-gray-600 text-sm font-medium">Looking for your order?</p>
+                    <p className="text-xs text-gray-400 mt-1 max-w-sm mx-auto">
+                      Use the search box above with the Order Reference sent to you at checkout to view delivery progress.
+                    </p>
+                  </div>
+                )}
               </section>
             )}
 

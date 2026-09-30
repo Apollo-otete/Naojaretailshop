@@ -173,7 +173,8 @@ router.delete('/categories/:id', auth, async (req, res) => {
 // ========================
 // ORDERS (PostgreSQL)
 // ========================
-router.get('/orders', async (req, res) => {
+// Admin only - view all orders
+router.get('/orders', auth, async (req, res) => {
   try {
     const { rows } = await pgPool.query('SELECT * FROM orders ORDER BY created_at DESC');
     res.json(rows);
@@ -182,9 +183,50 @@ router.get('/orders', async (req, res) => {
   }
 });
 
+// Customer public order tracking by order reference and phone number
+router.get('/orders/track', async (req, res) => {
+  try {
+    const { ref, phone } = req.query;
+    if (!ref || !phone) {
+      return res.status(400).json({ message: 'Order reference and phone number are required' });
+    }
+
+    const cleanPhone = phone.replace(/\D/g, '').slice(-9); // last 9 digits
+    const { rows } = await pgPool.query(
+      `SELECT id, order_ref, customer_name, customer_phone, total_amount, status, 
+              payment_status, payment_method, mpesa_transaction_id, shipping_address, 
+              items, created_at
+       FROM orders 
+       WHERE UPPER(order_ref) = UPPER($1) 
+         AND customer_phone LIKE $2`,
+      [ref.trim(), `%${cleanPhone}`]
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({ message: 'No matching order found. Please check your order reference and phone number.' });
+    }
+
+    res.json(rows[0]);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
 router.post('/orders', async (req, res) => {
   try {
-    const { customer_name, customer_phone, customer_email, total_amount, payment_method, mpesa_transaction_id, shipping_address, notes, items } = req.body;
+    const {
+      customer_name,
+      customer_phone,
+      customer_email,
+      total_amount,
+      payment_method,
+      payment_status,
+      mpesa_transaction_id,
+      mpesa_checkout_request_id,
+      shipping_address,
+      notes,
+      items
+    } = req.body;
 
     const { rows: countRows } = await pgPool.query('SELECT count(*) FROM orders');
     const orderCount = parseInt(countRows[0].count, 10);
@@ -193,9 +235,23 @@ router.post('/orders', async (req, res) => {
     const result = await pgPool.query(`
       INSERT INTO orders (
         order_ref, customer_name, customer_phone, customer_email, total_amount,
-        payment_method, mpesa_transaction_id, shipping_address, notes, items
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *
-    `, [order_ref, customer_name, customer_phone, customer_email, total_amount, payment_method, mpesa_transaction_id, shipping_address, notes, JSON.stringify(items)]);
+        payment_method, payment_status, mpesa_transaction_id, mpesa_checkout_request_id,
+        shipping_address, notes, items
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING *
+    `, [
+      order_ref,
+      customer_name,
+      customer_phone,
+      customer_email,
+      total_amount,
+      payment_method || 'mpesa',
+      payment_status || 'pending',
+      mpesa_transaction_id || '',
+      mpesa_checkout_request_id || '',
+      shipping_address,
+      notes,
+      JSON.stringify(items || [])
+    ]);
 
     // Decrement stock in Mongo
     if (items && items.length > 0) {

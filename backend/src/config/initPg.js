@@ -22,11 +22,13 @@ const initPgTables = async () => {
         payment_status VARCHAR(50) DEFAULT 'pending',
         mpesa_till_number VARCHAR(50),
         mpesa_transaction_id VARCHAR(100),
+        mpesa_checkout_request_id VARCHAR(100),
         shipping_address TEXT,
         notes TEXT,
         items JSONB,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
+      ALTER TABLE orders ADD COLUMN IF NOT EXISTS mpesa_checkout_request_id VARCHAR(100);
     `);
 
     await client.query(`

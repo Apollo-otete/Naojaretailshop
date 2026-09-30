@@ -9,7 +9,11 @@ const authMiddleware = (req, res, next) => {
 
   try {
     const cleanToken = token.startsWith('Bearer ') ? token.slice(7, token.length) : token;
-    const verified = jwt.verify(cleanToken, process.env.JWT_SECRET || 'fallback_secret_key_123');
+    const jwtSecret = process.env.JWT_SECRET || (process.env.NODE_ENV === 'production' ? null : 'fallback_dev_secret_key_123');
+    if (!jwtSecret) {
+      return res.status(500).json({ message: 'Authentication misconfigured' });
+    }
+    const verified = jwt.verify(cleanToken, jwtSecret);
     req.admin = verified;
     next();
   } catch (err) {

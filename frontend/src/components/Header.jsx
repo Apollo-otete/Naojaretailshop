@@ -5,15 +5,16 @@ import { useCart } from '../lib/cart';
 import { api } from '../lib/api';
 
 const DEFAULT_CATEGORIES = [
-  { id: '1', name: 'Phones', slug: 'phones', description: 'Smartphones & accessories', image_url: '', product_count: 45 },
-  { id: '2', name: 'Laptops & Computers', slug: 'laptops-computers', description: 'Work & gaming', image_url: '', product_count: 32 },
-  { id: '3', name: 'TVs & Displays', slug: 'tvs-displays', description: '4K, smart TVs', image_url: '', product_count: 28 },
-  { id: '4', name: 'Audio', slug: 'audio', description: 'Speakers & earphones', image_url: '', product_count: 56 },
-  { id: '5', name: 'Solar', slug: 'solar', description: 'Panels, inverters', image_url: '', product_count: 24 },
-  { id: '6', name: 'Home Appliances', slug: 'home-appliances', description: 'Kitchen & home', image_url: '', product_count: 41 },
-  { id: '7', name: 'Electrical Installation', slug: 'electrical-installation', description: 'Switches, breakers', image_url: '', product_count: 89 },
-  { id: '8', name: 'Gaming Devices', slug: 'gaming-devices', description: 'Consoles & pads', image_url: '', product_count: 18 },
-  { id: '9', name: 'Accessories', slug: 'accessories', description: 'Chargers, cables', image_url: '', product_count: 124 },
+  { id: 1, name: 'Mobile Phones', slug: 'mobile-phones', icon: '📱', product_count: 3 },
+  { id: 2, name: 'Audio Devices', slug: 'audio-devices', icon: '🎧', product_count: 2 },
+  { id: 3, name: 'Television Products', slug: 'television-products', icon: '📺', product_count: 1 },
+  { id: 4, name: 'Charging Accessories', slug: 'charging-accessories', icon: '🔌', product_count: 1 },
+  { id: 5, name: 'Computers & Accessories', slug: 'computers-accessories', icon: '💻', product_count: 1 },
+  { id: 6, name: 'Electrical Products', slug: 'electrical-products', icon: '⚡', product_count: 1 },
+  { id: 7, name: 'Security Products', slug: 'security-products', icon: '🔒', product_count: 1 },
+  { id: 8, name: 'Networking Products', slug: 'networking-products', icon: '🌐', product_count: 1 },
+  { id: 9, name: 'Renewable Energy', slug: 'renewable-energy', icon: '☀️', product_count: 1 },
+  { id: 10, name: 'Home Appliances', slug: 'home-appliances', icon: '🏠', product_count: 1 },
 ];
 
 export default function Header() {

@@ -61,9 +61,11 @@ CREATE TABLE IF NOT EXISTS orders (
     payment_status VARCHAR(50) DEFAULT 'pending', -- pending, paid, failed
     mpesa_till_number VARCHAR(20) DEFAULT '4149288',
     mpesa_transaction_id VARCHAR(100),
+    mpesa_checkout_request_id VARCHAR(100),
     mpesa_payment_confirmation TEXT,
     shipping_address TEXT,
     notes TEXT,
+    items JSONB,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
