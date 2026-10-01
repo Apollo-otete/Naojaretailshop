@@ -422,6 +422,24 @@ function handleLocalFallback(endpoint, options = {}) {
         );
       }
 
+      const page = urlObj.searchParams.get('page');
+      const limit = urlObj.searchParams.get('limit');
+      if (page || limit) {
+        const pageNum = Math.max(1, parseInt(page) || 1);
+        const limitNum = Math.max(1, parseInt(limit) || 12);
+        const total = list.length;
+        const paged = list.slice((pageNum - 1) * limitNum, pageNum * limitNum);
+        return {
+          products: paged,
+          pagination: {
+            total,
+            page: pageNum,
+            limit: limitNum,
+            totalPages: Math.ceil(total / limitNum)
+          }
+        };
+      }
+
       return list;
     }
 
@@ -527,6 +545,24 @@ function handleLocalFallback(endpoint, options = {}) {
   // 3. ORDERS ENDPOINTS
   if (endpoint.startsWith('/api/orders')) {
     if (method === 'GET') {
+      const urlObj = new URL(`http://localhost${endpoint}`);
+      const page = urlObj.searchParams.get('page');
+      const limit = urlObj.searchParams.get('limit');
+      if (page || limit) {
+        const pageNum = Math.max(1, parseInt(page) || 1);
+        const limitNum = Math.max(1, parseInt(limit) || 20);
+        const total = db.orders.length;
+        const paged = db.orders.slice((pageNum - 1) * limitNum, pageNum * limitNum);
+        return {
+          orders: paged,
+          pagination: {
+            total,
+            page: pageNum,
+            limit: limitNum,
+            totalPages: Math.ceil(total / limitNum)
+          }
+        };
+      }
       return db.orders;
     }
 
@@ -587,6 +623,21 @@ function handleLocalFallback(endpoint, options = {}) {
         return db.orders[idx];
       }
       throw new Error('Order not found for update');
+    }
+
+    // Order tracking by ref and phone
+    if (method === 'GET' && endpoint.includes('/track')) {
+      const urlObj = new URL(`http://localhost${endpoint}`);
+      const ref = urlObj.searchParams.get('ref');
+      const phone = urlObj.searchParams.get('phone');
+      if (!ref || !phone) throw new Error('Order reference and phone number are required');
+      const cleanPhone = phone.replace(/\D/g, '').slice(-9);
+      const order = db.orders.find(o =>
+        o.order_ref && o.order_ref.toUpperCase() === ref.trim().toUpperCase() &&
+        o.customer_phone && o.customer_phone.replace(/\D/g, '').endsWith(cleanPhone)
+      );
+      if (!order) throw new Error('No matching order found. Please check your order reference and phone number.');
+      return order;
     }
   }
 
@@ -707,6 +758,10 @@ function handleLocalFallback(endpoint, options = {}) {
     throw new Error('Invalid credentials');
   }
 
+  if (endpoint.startsWith('/api/auth/change-password') && method === 'PUT') {
+    return { message: 'Password updated successfully' };
+  }
+
   // 7. ANALYTICS ENDPOINT
   if (endpoint.startsWith('/api/analytics') && method === 'GET') {
     const totalSales = db.orders
@@ -716,15 +771,30 @@ function handleLocalFallback(endpoint, options = {}) {
     const pendingMessagesCount = db.messages.filter(m => !m.is_read).length;
     const lowStockCount = db.products.filter(p => p.stock_quantity <= 5).length;
 
-    // Monthly sales mock
-    const monthlySales = [
-      { name: 'Jan', sales: totalSales * 0.15 + 5000 },
-      { name: 'Feb', sales: totalSales * 0.20 + 8000 },
-      { name: 'Mar', sales: totalSales * 0.25 + 12000 },
-      { name: 'Apr', sales: totalSales * 0.30 + 15000 },
-      { name: 'May', sales: totalSales * 0.35 + 20000 },
-      { name: 'Jun', sales: totalSales + 25000 }
-    ];
+    // Generate chronological last 6 months
+    const months = [];
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(1);
+      d.setMonth(d.getMonth() - i);
+      const name = d.toLocaleString('en-US', { month: 'short' });
+      const yearMonthKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      months.push({ key: yearMonthKey, name, sales: 0 });
+    }
+
+    const salesMap = {};
+    db.orders
+      .filter(o => o.payment_status === 'paid' || o.status === 'delivered')
+      .forEach(o => {
+        const d = new Date(o.created_at || Date.now());
+        const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+        salesMap[key] = (salesMap[key] || 0) + (o.total_amount || 0);
+      });
+
+    const monthlySales = months.map(m => ({
+      name: m.name,
+      sales: salesMap[m.key] || 0
+    }));
 
     return {
       totalSales,
@@ -789,10 +859,12 @@ async function request(endpoint, options = {}) {
 
 export const api = {
   // Products
-  getProducts: (categorySlug = '', search = '') => {
+  getProducts: (categorySlug = '', search = '', page = null, limit = null) => {
     const params = new URLSearchParams();
     if (categorySlug) params.append('category', categorySlug);
     if (search) params.append('search', search);
+    if (page) params.append('page', page);
+    if (limit) params.append('limit', limit);
     return request(`/api/products?${params.toString()}`);
   },
 
@@ -867,6 +939,7 @@ export const api = {
   // Admin Portal endpoints
   admin: {
     login: (credentials) => request('/api/auth/login', { method: 'POST', body: credentials }),
+    changePassword: (data) => request('/api/auth/change-password', { method: 'PUT', body: data }),
     
     // Products CRUD
     getProducts: () => request('/api/products?admin=true'),
@@ -880,7 +953,13 @@ export const api = {
     deleteCategory: (id) => request(`/api/categories/${id}`, { method: 'DELETE' }),
 
     // Orders Management
-    getOrders: () => request('/api/orders'),
+    getOrders: (page = null, limit = null) => {
+      const params = new URLSearchParams();
+      if (page) params.append('page', page);
+      if (limit) params.append('limit', limit);
+      const queryStr = params.toString();
+      return request(`/api/orders${queryStr ? `?${queryStr}` : ''}`);
+    },
     updateOrderStatus: (id, status) => request(`/api/orders/${id}`, { method: 'PUT', body: { status } }),
     updateOrderPaymentStatus: (id, paymentStatus) => request(`/api/orders/${id}`, { method: 'PUT', body: { payment_status: paymentStatus } }),
 
@@ -894,6 +973,7 @@ export const api = {
 
     // Contacts
     getMessages: () => request('/api/contacts'),
+    markMessageRead: (id) => request(`/api/contacts/${id}/read`, { method: 'PUT' }),
 
     // Analytics
     getAnalytics: () => request('/api/analytics'),

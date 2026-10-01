@@ -27,7 +27,9 @@ import {
   Menu,
   Upload,
   ImageIcon,
-  LogOut
+  LogOut,
+  Key,
+  Lock
 } from 'lucide-react';
 
 export default function AdminDashboard() {
@@ -56,9 +58,12 @@ export default function AdminDashboard() {
   // Search & Filter States
   const [prodSearch, setProdSearch] = useState('');
   const [prodCategoryFilter, setProdCategoryFilter] = useState('');
+  const [prodPage, setProdPage] = useState(1);
   const [orderSearch, setOrderSearch] = useState('');
   const [orderStatusFilter, setOrderStatusFilter] = useState('');
   const [orderPaymentFilter, setOrderPaymentFilter] = useState('');
+  const [orderPage, setOrderPage] = useState(1);
+  const adminPageSize = 10;
 
   // Modals States
   const [selectedOrder, setSelectedOrder] = useState(null);
@@ -66,6 +71,9 @@ export default function AdminDashboard() {
   const [editingProduct, setEditingProduct] = useState(null);
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
   const [editingCategory, setEditingCategory] = useState(null);
+  const [isPasswordModalOpen, setIsPasswordModalOpen] = useState(false);
+  const [passwordForm, setPasswordForm] = useState({ currentPassword: '', newPassword: '', confirmPassword: '' });
+  const [passwordStatus, setPasswordStatus] = useState({ loading: false, error: '', success: '' });
 
   // Form States - Product
   const [productForm, setProductForm] = useState({
@@ -328,13 +336,52 @@ export default function AdminDashboard() {
   const handleToggleMessageRead = async (msg) => {
     const updatedMessages = messages.map(m => m.id === msg.id ? { ...m, is_read: !m.is_read } : m);
     setMessages(updatedMessages);
-    // Simulating endpoint persistence in fallback
+    refreshAnalytics(products, orders, subscribers, updatedMessages);
+    // Persist to real API (mark as read only — toggle back is local)
+    try {
+      if (!msg.is_read) {
+        await api.admin.markMessageRead(msg.id);
+      }
+    } catch (err) {
+      console.warn('Mark read API error:', err.message);
+    }
+    // Also update localStorage fallback
     const db = JSON.parse(localStorage.getItem('naoja_db'));
     if (db) {
       db.messages = db.messages.map(m => m.id === msg.id ? { ...m, is_read: !msg.is_read } : m);
       localStorage.setItem('naoja_db', JSON.stringify(db));
     }
-    refreshAnalytics(products, orders, subscribers, updatedMessages);
+  };
+
+  // Handle password change
+  const handlePasswordSubmit = async (e) => {
+    e.preventDefault();
+    setPasswordStatus({ loading: true, error: '', success: '' });
+
+    if (passwordForm.newPassword !== passwordForm.confirmPassword) {
+      setPasswordStatus({ loading: false, error: 'New passwords do not match', success: '' });
+      return;
+    }
+
+    if (passwordForm.newPassword.length < 6) {
+      setPasswordStatus({ loading: false, error: 'Password must be at least 6 characters long', success: '' });
+      return;
+    }
+
+    try {
+      await api.admin.changePassword({
+        currentPassword: passwordForm.currentPassword,
+        newPassword: passwordForm.newPassword
+      });
+      setPasswordStatus({ loading: false, error: '', success: 'Password updated successfully!' });
+      setTimeout(() => {
+        setIsPasswordModalOpen(false);
+        setPasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '' });
+        setPasswordStatus({ loading: false, error: '', success: '' });
+      }, 1500);
+    } catch (err) {
+      setPasswordStatus({ loading: false, error: err.message || 'Failed to update password', success: '' });
+    }
   };
 
   // Handle logout
@@ -452,6 +499,17 @@ export default function AdminDashboard() {
 
           <div className="px-3 space-y-1">
             <div className="px-4 pb-2 text-[10px] text-gray-400 font-semibold tracking-wider uppercase">Shop Operations</div>
+            <button
+              onClick={() => {
+                setPasswordStatus({ loading: false, error: '', success: '' });
+                setPasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '' });
+                setIsPasswordModalOpen(true);
+              }}
+              className="w-full h-10 px-4 rounded-xl flex items-center gap-3 font-semibold text-sm text-gray-700 hover:bg-gray-100 transition-all"
+            >
+              <Key className="w-4.5 h-4.5 text-gray-500" />
+              Change Password
+            </button>
             <button
               onClick={handleLogout}
               className="w-full h-10 px-4 rounded-xl flex items-center gap-3 font-semibold text-sm text-red-500 hover:bg-red-50 transition-all"
@@ -711,7 +769,9 @@ export default function AdminDashboard() {
                               <td colSpan="6" className="py-12 text-center text-gray-400 font-medium">No products match your parameters.</td>
                             </tr>
                           ) : (
-                            filteredProducts.map(prod => {
+                            filteredProducts
+                              .slice((prodPage - 1) * adminPageSize, prodPage * adminPageSize)
+                              .map(prod => {
                               const cat = categories.find(c => c.id === prod.category_id);
                               return (
                                 <tr key={prod.id} className="hover:bg-gray-50 transition-colors">
@@ -770,6 +830,34 @@ export default function AdminDashboard() {
                         </tbody>
                       </table>
                     </div>
+
+                    {/* Products Pagination */}
+                    {filteredProducts.length > adminPageSize && (
+                      <div className="px-6 py-3 border-t border-gray-100 bg-gray-50/50 flex items-center justify-between text-xs">
+                        <span className="text-gray-500 font-medium">
+                          Showing {(prodPage - 1) * adminPageSize + 1} to {Math.min(prodPage * adminPageSize, filteredProducts.length)} of {filteredProducts.length} products
+                        </span>
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => setProdPage(p => Math.max(1, p - 1))}
+                            disabled={prodPage === 1}
+                            className="px-3 py-1 border border-gray-200 rounded-lg font-semibold text-gray-700 disabled:opacity-40 hover:bg-white transition-colors"
+                          >
+                            Previous
+                          </button>
+                          <span className="px-2 font-bold text-gray-700">
+                            Page {prodPage} of {Math.ceil(filteredProducts.length / adminPageSize)}
+                          </span>
+                          <button
+                            onClick={() => setProdPage(p => Math.min(Math.ceil(filteredProducts.length / adminPageSize), p + 1))}
+                            disabled={prodPage === Math.ceil(filteredProducts.length / adminPageSize)}
+                            className="px-3 py-1 border border-gray-200 rounded-lg font-semibold text-gray-700 disabled:opacity-40 hover:bg-white transition-colors"
+                          >
+                            Next
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
@@ -894,7 +982,9 @@ export default function AdminDashboard() {
                               <td colSpan="7" className="py-12 text-center text-gray-400 font-medium">No orders registered under these parameters.</td>
                             </tr>
                           ) : (
-                            filteredOrders.map(order => (
+                            filteredOrders
+                              .slice((orderPage - 1) * adminPageSize, orderPage * adminPageSize)
+                              .map(order => (
                               <tr key={order.id} className="hover:bg-gray-50 transition-colors">
                                 <td className="px-6 py-4 font-bold text-gray-900 text-sm">
                                   {order.order_ref}
@@ -944,6 +1034,34 @@ export default function AdminDashboard() {
                         </tbody>
                       </table>
                     </div>
+
+                    {/* Orders Pagination */}
+                    {filteredOrders.length > adminPageSize && (
+                      <div className="px-6 py-3 border-t border-gray-100 bg-gray-50/50 flex items-center justify-between text-xs">
+                        <span className="text-gray-500 font-medium">
+                          Showing {(orderPage - 1) * adminPageSize + 1} to {Math.min(orderPage * adminPageSize, filteredOrders.length)} of {filteredOrders.length} orders
+                        </span>
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => setOrderPage(p => Math.max(1, p - 1))}
+                            disabled={orderPage === 1}
+                            className="px-3 py-1 border border-gray-200 rounded-lg font-semibold text-gray-700 disabled:opacity-40 hover:bg-white transition-colors"
+                          >
+                            Previous
+                          </button>
+                          <span className="px-2 font-bold text-gray-700">
+                            Page {orderPage} of {Math.ceil(filteredOrders.length / adminPageSize)}
+                          </span>
+                          <button
+                            onClick={() => setOrderPage(p => Math.min(Math.ceil(filteredOrders.length / adminPageSize), p + 1))}
+                            disabled={orderPage === Math.ceil(filteredOrders.length / adminPageSize)}
+                            className="px-3 py-1 border border-gray-200 rounded-lg font-semibold text-gray-700 disabled:opacity-40 hover:bg-white transition-colors"
+                          >
+                            Next
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
@@ -1496,6 +1614,95 @@ export default function AdminDashboard() {
                   className="h-11 px-5 bg-brand-600 hover:bg-brand-700 text-white rounded-xl font-bold transition-all"
                 >
                   {editingCategory ? 'Save Changes' : 'Create Category'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Password Change Modal */}
+      {isPasswordModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl overflow-hidden">
+            <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
+              <h3 className="font-bold text-gray-900 text-base flex items-center gap-2">
+                <Key className="w-4.5 h-4.5 text-brand-600" />
+                Change Admin Password
+              </h3>
+              <button 
+                onClick={() => setIsPasswordModalOpen(false)} 
+                className="p-1 hover:bg-gray-100 rounded-lg text-gray-500"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handlePasswordSubmit} className="p-6 space-y-4 text-xs">
+              {passwordStatus.error && (
+                <div className="p-3 bg-red-50 border border-red-200 text-red-700 rounded-xl text-xs flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 shrink-0" />
+                  <span>{passwordStatus.error}</span>
+                </div>
+              )}
+
+              {passwordStatus.success && (
+                <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-xl text-xs flex items-center gap-2">
+                  <CheckCircle className="w-4 h-4 shrink-0" />
+                  <span>{passwordStatus.success}</span>
+                </div>
+              )}
+
+              <div>
+                <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1.5">Current Password</label>
+                <input
+                  type="password"
+                  required
+                  value={passwordForm.currentPassword}
+                  onChange={(e) => setPasswordForm({ ...passwordForm, currentPassword: e.target.value })}
+                  placeholder="Enter current password"
+                  className="w-full h-11 border border-gray-200 rounded-xl px-3.5 text-xs focus:border-brand-500 outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1.5">New Password (min 6 characters)</label>
+                <input
+                  type="password"
+                  required
+                  value={passwordForm.newPassword}
+                  onChange={(e) => setPasswordForm({ ...passwordForm, newPassword: e.target.value })}
+                  placeholder="Enter new strong password"
+                  className="w-full h-11 border border-gray-200 rounded-xl px-3.5 text-xs focus:border-brand-500 outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1.5">Confirm New Password</label>
+                <input
+                  type="password"
+                  required
+                  value={passwordForm.confirmPassword}
+                  onChange={(e) => setPasswordForm({ ...passwordForm, confirmPassword: e.target.value })}
+                  placeholder="Repeat new password"
+                  className="w-full h-11 border border-gray-200 rounded-xl px-3.5 text-xs focus:border-brand-500 outline-none"
+                />
+              </div>
+
+              <div className="border-t border-gray-100 pt-4 flex justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => setIsPasswordModalOpen(false)}
+                  className="h-11 px-5 border border-gray-200 hover:bg-gray-50 text-gray-700 rounded-xl font-bold transition-all"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={passwordStatus.loading}
+                  className="h-11 px-5 bg-brand-600 hover:bg-brand-700 disabled:opacity-50 text-white rounded-xl font-bold transition-all"
+                >
+                  {passwordStatus.loading ? 'Updating...' : 'Update Password'}
                 </button>
               </div>
             </form>

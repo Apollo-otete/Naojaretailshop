@@ -14,7 +14,7 @@ export default function CheckoutPage() {
   const { items, total, clearCart } = useCart();
   const navigate = useNavigate();
   const [step, setStep] = useState(1);
-  const [formData, setFormData] = useState({ fullName: '', phone: '', area: '', directions: '', fulfillment: 'delivery' });
+  const [formData, setFormData] = useState({ fullName: '', phone: '', email: '', area: '', directions: '', fulfillment: 'delivery' });
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [confirmedOrder, setConfirmedOrder] = useState(null);
@@ -75,6 +75,7 @@ export default function CheckoutPage() {
     const orderPayload = {
       customer_name: formData.fullName,
       customer_phone: formData.phone,
+      customer_email: formData.email || '',
       total_amount: grandTotal,
       payment_method: 'mpesa',
       payment_status: 'pending',
@@ -341,6 +342,16 @@ export default function CheckoutPage() {
                       className={`w-full h-11 border rounded-control px-3.5 text-sm outline-none focus:border-brand-500 ${errors.phone ? 'border-red-400' : 'border-gray-200'}`}
                     />
                     {errors.phone && <p className="text-xs text-red-500 mt-1">{errors.phone}</p>}
+                  </div>
+                  <div>
+                    <label className="text-xs font-bold uppercase text-gray-500 block mb-1.5">Email Address <span className="text-gray-300 font-normal normal-case">(for order confirmation)</span></label>
+                    <input
+                      type="email"
+                      placeholder="e.g., yourname@gmail.com"
+                      value={formData.email}
+                      onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                      className="w-full h-11 border border-gray-200 rounded-control px-3.5 text-sm outline-none focus:border-brand-500"
+                    />
                   </div>
                 </div>
 

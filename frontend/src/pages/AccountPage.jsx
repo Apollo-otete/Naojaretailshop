@@ -1,5 +1,5 @@
 import { Link, useSearchParams } from 'react-router-dom';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Package, MapPin, Truck, Headphones, Send, Clock, CheckCircle } from 'lucide-react';
 import Layout from '../components/Layout';
 import { api } from '../lib/api';

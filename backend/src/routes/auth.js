@@ -4,6 +4,8 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { pgPool } = require('../config/db');
 
+const authMiddleware = require('../middleware/auth');
+
 router.post('/login', async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -44,6 +46,42 @@ router.post('/login', async (req, res) => {
         email: admin.email
       }
     });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Admin change password route
+router.put('/change-password', authMiddleware, async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+    const adminId = req.admin.id;
+
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({ message: 'Current password and new password are required' });
+    }
+
+    if (newPassword.length < 6) {
+      return res.status(400).json({ message: 'New password must be at least 6 characters long' });
+    }
+
+    const { rows } = await pgPool.query('SELECT * FROM admins WHERE id = $1', [adminId]);
+    if (rows.length === 0) {
+      return res.status(404).json({ message: 'Admin not found' });
+    }
+
+    const admin = rows[0];
+    const isMatch = await bcrypt.compare(currentPassword, admin.password);
+    if (!isMatch) {
+      return res.status(400).json({ message: 'Incorrect current password' });
+    }
+
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(newPassword, salt);
+
+    await pgPool.query('UPDATE admins SET password = $1 WHERE id = $2', [hashedPassword, adminId]);
+
+    res.json({ message: 'Password updated successfully' });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }

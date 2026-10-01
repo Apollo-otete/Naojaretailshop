@@ -5,6 +5,7 @@ import Layout from '../components/Layout';
 import QuantityControl from '../components/QuantityControl';
 import FulfillmentModule from '../components/FulfillmentModule';
 import ProductCard from '../components/ProductCard';
+import SEO from '../components/SEO';
 import { useCart } from '../lib/cart';
 import { api } from '../lib/api';
 
@@ -86,13 +87,20 @@ export default function ProductPage() {
   }
 
   // Construct WhatsApp inquiry link
+  const whatsappNumber = import.meta.env.VITE_WHATSAPP_NUMBER || '254712345678';
   const encodedMessage = encodeURIComponent(
     `Hello Naoja Ventures, I am inquiring about the product: ${product.name} (Price: KSh ${product.price.toLocaleString()}). Is it currently in stock?`
   );
-  const whatsappUrl = `https://wa.me/254704812343?text=${encodedMessage}`;
+  const whatsappUrl = `https://wa.me/${whatsappNumber}?text=${encodedMessage}`;
 
   return (
     <Layout>
+      <SEO 
+        title={product.name}
+        description={product.description ? product.description.slice(0, 160) : `Buy ${product.name} at Naoja Ventures Kakamega. Price: KSh ${product.price.toLocaleString()}.`}
+        image={product.images && product.images[0] ? product.images[0] : undefined}
+        type="product"
+      />
       <div className="max-w-7xl mx-auto px-4 py-6">
         {/* Breadcrumb / Back Button */}
         <div className="flex items-center justify-between pb-6 border-b border-gray-100">

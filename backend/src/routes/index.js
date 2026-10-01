@@ -7,6 +7,7 @@ const Category = require('../models/Category');
 const Review = require('../models/Review');
 const { pgPool } = require('../config/db');
 const auth = require('../middleware/auth');
+const { sendOrderConfirmation, sendAdminOrderAlert } = require('../services/emailService');
 
 // Multer config — save files to backend/uploads/
 const storage = multer.diskStorage({
@@ -33,13 +34,15 @@ const upload = multer({
 // ========================
 router.get('/products', async (req, res) => {
   try {
-    const { category, search, admin } = req.query;
+    const { category, search, admin, page, limit } = req.query;
     let query = {};
 
     if (category) {
       const cat = await Category.findOne({ slug: category });
       if (cat) query.category_id = cat.id;
-      else return res.json([]);
+      else return (page || limit)
+        ? res.json({ products: [], pagination: { total: 0, page: 1, limit: parseInt(limit) || 12, totalPages: 0 } })
+        : res.json([]);
     }
 
     if (search) {
@@ -48,6 +51,30 @@ router.get('/products', async (req, res) => {
         { description: { $regex: search, $options: 'i' } },
         { subcategory: { $regex: search, $options: 'i' } }
       ];
+    }
+
+    const total = await Product.countDocuments(query);
+    res.setHeader('X-Total-Count', total);
+
+    if (page || limit) {
+      const pageNum = Math.max(1, parseInt(page) || 1);
+      const limitNum = Math.max(1, parseInt(limit) || 12);
+      const skip = (pageNum - 1) * limitNum;
+
+      const products = await Product.find(query)
+        .sort({ id: 1 })
+        .skip(skip)
+        .limit(limitNum);
+
+      return res.json({
+        products,
+        pagination: {
+          total,
+          page: pageNum,
+          limit: limitNum,
+          totalPages: Math.ceil(total / limitNum)
+        }
+      });
     }
 
     const products = await Product.find(query).sort({ id: 1 });
@@ -173,9 +200,35 @@ router.delete('/categories/:id', auth, async (req, res) => {
 // ========================
 // ORDERS (PostgreSQL)
 // ========================
-// Admin only - view all orders
+// Admin only - view orders with optional pagination
 router.get('/orders', auth, async (req, res) => {
   try {
+    const { page, limit } = req.query;
+    const countResult = await pgPool.query('SELECT COUNT(*) FROM orders');
+    const total = parseInt(countResult.rows[0].count, 10);
+    res.setHeader('X-Total-Count', total);
+
+    if (page || limit) {
+      const pageNum = Math.max(1, parseInt(page) || 1);
+      const limitNum = Math.max(1, parseInt(limit) || 20);
+      const offset = (pageNum - 1) * limitNum;
+
+      const { rows } = await pgPool.query(
+        'SELECT * FROM orders ORDER BY created_at DESC LIMIT $1 OFFSET $2',
+        [limitNum, offset]
+      );
+
+      return res.json({
+        orders: rows,
+        pagination: {
+          total,
+          page: pageNum,
+          limit: limitNum,
+          totalPages: Math.ceil(total / limitNum)
+        }
+      });
+    }
+
     const { rows } = await pgPool.query('SELECT * FROM orders ORDER BY created_at DESC');
     res.json(rows);
   } catch (error) {
@@ -263,7 +316,13 @@ router.post('/orders', async (req, res) => {
       }
     }
 
-    res.status(201).json({ message: 'Order placed successfully', order: result.rows[0] });
+    const createdOrder = result.rows[0];
+
+    // Asynchronously dispatch notifications (non-blocking)
+    sendOrderConfirmation(createdOrder).catch(e => console.warn('Order confirmation email err:', e.message));
+    sendAdminOrderAlert(createdOrder).catch(e => console.warn('Admin alert email err:', e.message));
+
+    res.status(201).json({ message: 'Order placed successfully', order: createdOrder });
   } catch (error) {
     res.status(400).json({ message: error.message });
   }
@@ -294,7 +353,26 @@ router.put('/orders/:id', auth, async (req, res) => {
     const result = await pgPool.query(query, values);
 
     if (result.rows.length === 0) return res.status(404).json({ message: 'Order not found' });
-    res.json(result.rows[0]);
+    const updatedOrder = result.rows[0];
+
+    // Restore stock if order is being cancelled
+    if (status === 'cancelled') {
+      try {
+        const items = Array.isArray(updatedOrder.items)
+          ? updatedOrder.items
+          : JSON.parse(updatedOrder.items || '[]');
+        for (const item of items) {
+          await Product.findOneAndUpdate(
+            { id: item.product_id },
+            { $inc: { stock_quantity: item.quantity } }
+          );
+        }
+      } catch (stockErr) {
+        console.warn('⚠️ Could not restore stock on cancel:', stockErr.message);
+      }
+    }
+
+    res.json(updatedOrder);
   } catch (error) {
     res.status(400).json({ message: error.message });
   }
@@ -408,6 +486,20 @@ router.post('/contacts', async (req, res) => {
   }
 });
 
+// Mark a contact message as read
+router.put('/contacts/:id/read', auth, async (req, res) => {
+  try {
+    const { rows } = await pgPool.query(
+      'UPDATE messages SET is_read = true WHERE id = $1 RETURNING *',
+      [req.params.id]
+    );
+    if (rows.length === 0) return res.status(404).json({ message: 'Message not found' });
+    res.json(rows[0]);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
 // ========================
 // OTHERS
 // ========================
@@ -430,14 +522,38 @@ router.get('/analytics', auth, async (req, res) => {
 
     const totalSales = parseFloat(totalSalesResult.rows[0].sum || 0);
 
-    const monthlySales = [
-      { name: 'Jan', sales: totalSales * 0.15 + 5000 },
-      { name: 'Feb', sales: totalSales * 0.20 + 8000 },
-      { name: 'Mar', sales: totalSales * 0.25 + 12000 },
-      { name: 'Apr', sales: totalSales * 0.30 + 15000 },
-      { name: 'May', sales: totalSales * 0.35 + 20000 },
-      { name: 'Jun', sales: totalSales + 25000 }
-    ];
+    // Generate the last 6 calendar months in chronological order
+    const months = [];
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(1);
+      d.setMonth(d.getMonth() - i);
+      const monthName = d.toLocaleString('en-US', { month: 'short' });
+      const yearMonthKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      months.push({ key: yearMonthKey, name: monthName, sales: 0 });
+    }
+
+    // Query real completed sales grouped by calendar month
+    const monthlySalesResult = await pgPool.query(`
+      SELECT 
+        TO_CHAR(created_at, 'YYYY-MM') AS month_key,
+        COALESCE(SUM(total_amount), 0) AS sales
+      FROM orders
+      WHERE (payment_status = 'paid' OR status = 'delivered')
+        AND created_at >= DATE_TRUNC('month', NOW() - INTERVAL '5 months')
+      GROUP BY month_key
+      ORDER BY month_key ASC
+    `);
+
+    const salesMap = {};
+    for (const row of monthlySalesResult.rows) {
+      salesMap[row.month_key] = parseFloat(row.sales) || 0;
+    }
+
+    const monthlySales = months.map(m => ({
+      name: m.name,
+      sales: salesMap[m.key] || 0
+    }));
 
     res.json({
       totalSales,

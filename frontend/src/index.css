@@ -1,3 +1,5 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -8,16 +10,155 @@
   }
 
   body {
-    @apply antialiased;
+    @apply antialiased font-sans text-gray-900;
+    background: #f5f5f7;
+  }
+
+  :focus-visible {
+    @apply outline-2 outline-offset-2 outline-brand-500;
   }
 }
 
 @layer components {
   .btn-primary {
-    @apply h-11 px-4 bg-brand-500 text-white font-semibold rounded-control inline-flex items-center justify-center gap-2.5 hover:bg-brand-600 transition-colors cursor-pointer;
+    @apply h-11 px-5 bg-brand-500 text-white font-bold rounded-lg inline-flex items-center justify-center gap-2 hover:bg-brand-600 active:scale-[0.98] transition-all shadow-sm cursor-pointer;
   }
 
   .btn-secondary {
-    @apply h-11 px-4 bg-white border border-brand-500 text-brand-500 font-semibold rounded-control inline-flex items-center justify-center gap-2.5 hover:bg-brand-50 transition-colors cursor-pointer;
+    @apply h-11 px-5 bg-white border border-brand-500 text-brand-600 font-bold rounded-lg inline-flex items-center justify-center gap-2 hover:bg-brand-50 active:scale-[0.98] transition-all cursor-pointer;
+  }
+
+  .btn-retail-red {
+    @apply h-10 px-4 bg-retail-red text-white font-bold rounded-lg inline-flex items-center justify-center gap-1.5 hover:bg-red-700 active:scale-[0.98] transition-all shadow-sm cursor-pointer;
+  }
+
+  .retail-card {
+    @apply bg-white border border-gray-200/80 rounded-xl transition-all duration-200 hover:shadow-lg hover:border-gray-300;
+  }
+
+  .section-title {
+    @apply text-xl font-bold text-gray-900 flex items-center gap-2;
   }
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   SIDE-PANEL ELECTRONICS SLIDESHOW LAYOUT
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/*
+  Layout hierarchy:
+  ┌──────────────────────────────────────────┐
+  │  .page-shell  (full viewport)            │
+  │  ┌──────┐  ┌────────────────┐  ┌──────┐ │
+  │  │ side │  │  .page-center  │  │ side │ │
+  │  │panel │  │  (white col)   │  │panel │ │
+  │  │  L   │  │                │  │  R   │ │
+  │  └──────┘  └────────────────┘  └──────┘ │
+  └──────────────────────────────────────────┘
+*/
+
+.page-shell {
+  position: relative;
+  min-height: 100vh;
+  background: #ffffff;
+  display: flex;
+  justify-content: center;
+}
+
+/* ── Center content column ────────────────────────────────────────────── */
+.page-center {
+  position: relative;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  width: 100%;
+  max-width: 1280px;         /* same as Tailwind max-w-7xl  */
+  background: #ffffff;
+  /* Soft shadow so content floats over the side images */
+  box-shadow: 0 0 60px 8px rgba(0, 0, 0, 0.10);
+}
+
+/* ── Side panel base ──────────────────────────────────────────────────── */
+.side-panel {
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  /* Width of the exposed strip on each side */
+  width: calc((100vw - 1280px) / 2);
+  min-width: 0;
+  z-index: 1;
+  overflow: hidden;
+  /* Hide completely on small screens where there's no room */
+  display: none;
+}
+
+/* Only show when viewport is wide enough to have side columns */
+@media (min-width: 1380px) {
+  .side-panel { display: block; }
+}
+
+/* Left panel anchors to the left edge */
+.side-panel:first-of-type {
+  left: 0;
+}
+
+/* Right panel anchors to the right edge */
+.side-panel:last-of-type {
+  right: 0;
+}
+
+/* ── Individual slide frames ──────────────────────────────────────────── */
+.side-slide {
+  position: absolute;
+  inset: 0;
+  background-size: cover;
+  background-position: center;
+  opacity: 0;
+  transition: opacity 1.4s ease-in-out;
+  will-change: opacity;
+  animation: side-kenburns 24s ease-in-out infinite alternate;
+}
+
+.side-slide--active {
+  opacity: 1;
+}
+
+/* ── Fade edge: image blends into white at the center-facing edge ─────── */
+.side-panel-fade {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+}
+
+/* ── Brand colour warm tint (orange-amber at 25% opacity) ─────────────── */
+.side-panel-tint {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+  /* Warm brand tint — visible but not overpowering */
+  background: rgba(249, 115, 22, 0.18);   /* brand-500 @ 18% */
+}
+
+/* ── Ken-Burns pan on side panels ─────────────────────────────────────── */
+@keyframes side-kenburns {
+  0%   { transform: scale(1.00) translateY(0%);    }
+  100% { transform: scale(1.08) translateY(-3%);   }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   UTILITIES
+   ══════════════════════════════════════════════════════════════════════════ */
+
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+.product-img-zoom:hover img { transform: scale(1.05); }
+
+@keyframes soft-pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.5; }
+}
+.animate-soft-pulse { animation: soft-pulse 2s ease-in-out infinite; }

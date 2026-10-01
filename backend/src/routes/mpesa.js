@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { pgPool } = require('../config/db');
+const { sendOrderConfirmation } = require('../services/emailService');
 
 const {
   MPESA_CONSUMER_KEY,
@@ -147,12 +148,13 @@ router.post('/callback', async (req, res) => {
                  mpesa_transaction_id = $1,
                  status = CASE WHEN status = 'pending' THEN 'confirmed' ELSE status END
              WHERE mpesa_checkout_request_id = $2
-             RETURNING id, order_ref`,
+             RETURNING *`,
             [mpesaCode, checkoutRequestId]
           );
           if (result.rowCount > 0) {
             updated = true;
             console.log(`🎯 Order ${result.rows[0].order_ref} marked paid via CheckoutRequestID.`);
+            sendOrderConfirmation(result.rows[0]).catch(e => console.warn('Paid email error:', e.message));
           }
         }
 
@@ -167,11 +169,12 @@ router.post('/callback', async (req, res) => {
                AND customer_phone LIKE $2
              ORDER BY created_at DESC
              LIMIT 1
-             RETURNING id, order_ref`,
+             RETURNING *`,
             [mpesaCode, `%${String(phoneUsed).slice(-9)}`]
           );
           if (fallbackResult.rowCount > 0) {
             console.log(`🎯 Order ${fallbackResult.rows[0].order_ref} marked paid via phone match fallback.`);
+            sendOrderConfirmation(fallbackResult.rows[0]).catch(e => console.warn('Paid fallback email error:', e.message));
           }
         }
       }
