@@ -9,9 +9,9 @@ import AccountPage from './pages/AccountPage';
 import AdminDashboard from './pages/AdminDashboard';
 import AdminLogin from './pages/AdminLogin';
 
-// Admin Auth Guard
+// Admin Auth Guard - Enforces re-entry per session
 const ProtectedAdminRoute = ({ children }) => {
-  const token = localStorage.getItem('adminToken');
+  const token = sessionStorage.getItem('adminToken');
   if (!token) {
     return <Navigate to="/admin/login" replace />;
   }

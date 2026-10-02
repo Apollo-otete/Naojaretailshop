@@ -112,7 +112,7 @@ const sendOrderConfirmation = async (order) => {
 
         <div style="margin-top: 30px; padding: 16px; background: #ecfdf5; border: 1px solid #a7f3d0; border-radius: 8px; font-size: 13px; color: #065f46;">
           <strong>Need assistance with this order?</strong><br/>
-          Contact our support team directly via WhatsApp or Phone at <strong>+254 712 345 678</strong>.
+          Contact our support team directly via WhatsApp or Phone at <strong>+254 112 079 767</strong>.
         </div>
       </div>
 

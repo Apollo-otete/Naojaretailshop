@@ -95,18 +95,18 @@ export default function AccountPage() {
       <div className="max-w-7xl mx-auto px-4 py-8">
         <div className="grid lg:grid-cols-[260px_1fr] gap-8">
           {/* Sidebar */}
-          <aside className="bg-white border border-gray-200 rounded-card p-5 h-fit shadow-sm">
-            <h2 className="font-extrabold text-gray-900 mb-4 px-2 text-base uppercase tracking-wider text-gray-400 text-xs">My Account</h2>
-            <nav className="space-y-1">
+          <aside className="bg-white border border-gray-200 rounded-card p-3 sm:p-5 h-fit shadow-sm">
+            <h2 className="hidden lg:block font-extrabold text-gray-900 mb-4 px-2 text-base uppercase tracking-wider text-gray-400 text-xs">My Account</h2>
+            <nav className="flex lg:flex-col gap-1.5 overflow-x-auto no-scrollbar py-1 lg:py-0">
               {TABS.map((tab) => {
                 const Icon = tab.icon;
                 return (
                   <button
                     key={tab.id}
                     onClick={() => setTab(tab.id)}
-                    className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-control text-left transition-colors cursor-pointer text-sm font-semibold ${
+                    className={`shrink-0 flex items-center gap-2.5 px-3.5 py-2 lg:py-2.5 rounded-xl text-left transition-colors cursor-pointer text-xs sm:text-sm font-semibold whitespace-nowrap touch-manipulation ${
                       activeTab === tab.id
-                        ? 'bg-brand-50 text-brand-600'
+                        ? 'bg-brand-50 text-brand-600 shadow-xs'
                         : 'text-gray-600 hover:bg-surface'
                     }`}
                   >
@@ -124,7 +124,7 @@ export default function AccountPage() {
             {activeTab === 'orders' && (
               <section className="space-y-6">
                 <div className="border-b border-gray-100 pb-4">
-                  <h2 className="font-serif text-3xl font-bold text-gray-900">Track Your Order</h2>
+                  <h2 className="font-display text-3xl font-extrabold text-gray-950">Track Your Order</h2>
                   <p className="text-xs text-gray-400 mt-1">Enter your Order Reference and Phone Number to check real-time status.</p>
                 </div>
 
@@ -236,7 +236,7 @@ export default function AccountPage() {
 
                     <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 text-xs text-blue-800 space-y-1">
                       <p className="font-bold">Need assistance with your delivery?</p>
-                      <p>Our Lurambi shop helpline is open Sunday–Thursday (8:30am–8:00pm) and Friday (8:30am–3:00pm). Call us at <strong>0704812343</strong>.</p>
+                      <p>Our Lurambi shop helpline is open Sunday–Thursday (8:30am–8:00pm) and Friday (8:30am–3:00pm). Call us at <strong>0112079767</strong>.</p>
                     </div>
                   </div>
                 ) : (
@@ -255,7 +255,7 @@ export default function AccountPage() {
             {activeTab === 'location' && (
               <section className="space-y-6">
                 <div className="border-b border-gray-100 pb-4">
-                  <h2 className="font-serif text-3xl font-bold text-gray-900">Store Location (Kakamega)</h2>
+                  <h2 className="font-display text-3xl font-extrabold text-gray-950">Store Location (Kakamega)</h2>
                   <p className="text-xs text-gray-400 mt-1">Visit our retail shop for physical support, browsing, or order pickup.</p>
                 </div>
                 
@@ -270,7 +270,7 @@ export default function AccountPage() {
                     </p>
                     <div className="pt-2">
                       <p className="text-xs font-bold uppercase text-gray-400 mb-1">Contact Info</p>
-                      <p className="text-sm text-gray-700">Phone: <strong>0704812343</strong></p>
+                      <p className="text-sm text-gray-700">Phone: <strong>0112079767</strong></p>
                     </div>
                   </div>
 
@@ -298,7 +298,7 @@ export default function AccountPage() {
             {activeTab === 'policy' && (
               <section className="space-y-6">
                 <div className="border-b border-gray-100 pb-4">
-                  <h2 className="font-serif text-3xl font-bold text-gray-900">Fulfillment Policy</h2>
+                  <h2 className="font-display text-3xl font-extrabold text-gray-950">Fulfillment Policy</h2>
                   <p className="text-xs text-gray-400 mt-1">Review rates, timings, and instructions for deliveries and pickups.</p>
                 </div>
 
@@ -336,7 +336,7 @@ export default function AccountPage() {
             {activeTab === 'support' && (
               <section className="space-y-6">
                 <div className="border-b border-gray-100 pb-4">
-                  <h2 className="font-serif text-3xl font-bold text-gray-900">Support &amp; Inquiries</h2>
+                  <h2 className="font-display text-3xl font-extrabold text-gray-950">Support &amp; Inquiries</h2>
                   <p className="text-xs text-gray-400 mt-1">Contact us regarding orders, brand partnerships, or general technical support.</p>
                 </div>
 
@@ -349,9 +349,9 @@ export default function AccountPage() {
                         <p className="text-xs text-gray-500 mt-1">Our phone support is open 8:30am-8:00pm (Sunday-Thursday).</p>
                       </div>
                       <div className="text-sm text-gray-600 space-y-2.5">
-                        <p>📞 Phone: <a href="tel:0704812343" className="text-brand-500 font-semibold hover:underline">0704812343</a></p>
-                        <p>💬 WhatsApp: <a href="https://wa.me/254704812343" target="_blank" rel="noopener noreferrer" className="text-brand-500 font-semibold hover:underline">0704812343</a></p>
-                        <p>✉️ Email: <a href="mailto:enquiries@naojaventures.com" className="text-brand-500 font-semibold hover:underline">enquiries@naojaventures.com</a></p>
+                        <p>📞 Phone: <a href="tel:01122079767" className="text-brand-500 font-semibold hover:underline">01122079767</a></p>
+                        <p>💬 WhatsApp: <a href="https://wa.me/2541122079767" target="_blank" rel="noopener noreferrer" className="text-brand-500 font-semibold hover:underline">01122079767</a></p>
+                        <p>✉️ Email: <a href="mailto:naojaventures@gmail.com" className="text-brand-500 font-semibold hover:underline">naojaventures@gmail.com</a></p>
                       </div>
                     </div>
 
@@ -365,7 +365,7 @@ export default function AccountPage() {
 
                   {/* Right: Contact Form */}
                   <div className="md:col-span-7 bg-white border border-gray-200 rounded-card p-5 sm:p-6 shadow-sm">
-                    <h3 className="font-serif text-xl font-bold text-gray-900 mb-1">Send an Inquiry</h3>
+                    <h3 className="font-display text-xl font-bold text-gray-900 mb-1">Send an Inquiry</h3>
                     <p className="text-xs text-gray-500 mb-5">Have a question or request? Send us a message and we'll reply via email.</p>
 
                     {contactStatus.message && (

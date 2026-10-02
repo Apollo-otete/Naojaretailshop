@@ -10,6 +10,14 @@ export default function AdminLogin() {
   const [error, setError] = useState('');
   const navigate = useNavigate();
 
+  React.useEffect(() => {
+    // Enforce fresh login: clean any prior session tokens when visiting login page
+    sessionStorage.removeItem('adminToken');
+    sessionStorage.removeItem('adminInfo');
+    localStorage.removeItem('adminToken');
+    localStorage.removeItem('adminInfo');
+  }, []);
+
   const handleLogin = async (e) => {
     e.preventDefault();
     setLoading(true);
@@ -18,28 +26,31 @@ export default function AdminLogin() {
     try {
       const res = await api.admin.login({ email, password });
       if (res.token) {
-        localStorage.setItem('adminToken', res.token);
-        localStorage.setItem('adminInfo', JSON.stringify(res.admin));
+        // Enforce per-session credentials (sessionStorage cleared upon tab close/exit)
+        sessionStorage.setItem('adminToken', res.token);
+        sessionStorage.setItem('adminInfo', JSON.stringify(res.admin));
+        localStorage.removeItem('adminToken');
+        localStorage.removeItem('adminInfo');
         navigate('/admin');
       }
     } catch (err) {
-      setError(err.message || 'Failed to login. Check credentials.');
+      setError(err.message || 'Failed to login. Please verify email and password.');
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col justify-center py-12 sm:px-6 lg:px-8 font-sans">
+    <div className="min-h-screen bg-slate-50 flex flex-col justify-center py-12 sm:px-6 lg:px-8 font-sans">
       <div className="sm:mx-auto sm:w-full sm:max-w-md text-center">
-        <div className="mx-auto w-16 h-16 bg-brand-100 rounded-full flex items-center justify-center mb-4">
-          <ShieldCheck className="w-8 h-8 text-brand-600" />
+        <div className="mx-auto w-14 h-14 rounded-2xl bg-gradient-to-tr from-brand-600 to-[#ff6b00] flex items-center justify-center text-white font-display font-black text-2xl shadow-lg mb-4">
+          N
         </div>
-        <h2 className="text-center text-3xl font-serif font-bold text-gray-900 tracking-tight">
-          Admin Portal
+        <h2 className="text-center text-2xl lg:text-3xl font-display font-extrabold text-gray-950 tracking-tight">
+          Naoja Executive Portal
         </h2>
-        <p className="mt-2 text-center text-sm text-gray-600">
-          Sign in to manage Naoja Ventures Retail Shop
+        <p className="mt-2 text-center text-xs text-gray-500 font-medium">
+          Sign in to access Naoja Retail Operations & Business Intelligence
         </p>
       </div>
 
@@ -65,7 +76,7 @@ export default function AdminLogin() {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   className="block w-full pl-10 h-12 border-gray-300 rounded-xl focus:ring-brand-500 focus:border-brand-500 text-sm border bg-gray-50"
-                  placeholder="admin@naojaventures.com"
+                  placeholder="naojaventures@gmail.com"
                 />
               </div>
             </div>

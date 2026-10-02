@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { pgPool } = require('../config/db');
 const { sendOrderConfirmation } = require('../services/emailService');
+const eventBus = require('../services/eventBus');
 
 const {
   MPESA_CONSUMER_KEY,
@@ -177,6 +178,14 @@ router.post('/callback', async (req, res) => {
             sendOrderConfirmation(fallbackResult.rows[0]).catch(e => console.warn('Paid fallback email error:', e.message));
           }
         }
+
+        // Broadcast real-time payment event to admin dashboard
+        eventBus.broadcast('payment_received', {
+          receipt: mpesaCode,
+          amount: amountPaid,
+          phone: phoneUsed,
+          checkoutRequestId
+        });
       }
     } else {
       console.warn(`❌ M-Pesa payment failed — ${resultDesc} (ResultCode: ${resultCode})`);
@@ -189,6 +198,13 @@ router.post('/callback', async (req, res) => {
           [checkoutRequestId]
         );
       }
+
+      // Broadcast real-time failure event to admin dashboard
+      eventBus.broadcast('payment_failed', {
+        resultCode,
+        resultDesc,
+        checkoutRequestId
+      });
     }
 
     // Always respond 200 to Safaricom so they stop retrying

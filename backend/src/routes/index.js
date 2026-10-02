@@ -8,6 +8,8 @@ const Review = require('../models/Review');
 const { pgPool } = require('../config/db');
 const auth = require('../middleware/auth');
 const { sendOrderConfirmation, sendAdminOrderAlert } = require('../services/emailService');
+const eventBus = require('../services/eventBus');
+const { invalidateAnalyticsCache } = require('../services/analyticsService');
 
 // Multer config — save files to backend/uploads/
 const storage = multer.diskStorage({
@@ -117,6 +119,7 @@ router.post('/products', auth, async (req, res) => {
     });
 
     await product.save();
+    invalidateAnalyticsCache();
     res.status(201).json(product);
   } catch (error) {
     res.status(400).json({ message: error.message });
@@ -131,6 +134,7 @@ router.put('/products/:id', auth, async (req, res) => {
     }
     const product = await Product.findOneAndUpdate({ id: req.params.id }, updateData, { new: true });
     if (!product) return res.status(404).json({ message: 'Product not found' });
+    invalidateAnalyticsCache();
     res.json(product);
   } catch (error) {
     res.status(400).json({ message: error.message });
@@ -140,6 +144,7 @@ router.put('/products/:id', auth, async (req, res) => {
 router.delete('/products/:id', auth, async (req, res) => {
   try {
     await Product.findOneAndDelete({ id: req.params.id });
+    invalidateAnalyticsCache();
     res.json({ message: 'Product deleted successfully', id: req.params.id });
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -321,6 +326,16 @@ router.post('/orders', async (req, res) => {
     // Asynchronously dispatch notifications (non-blocking)
     sendOrderConfirmation(createdOrder).catch(e => console.warn('Order confirmation email err:', e.message));
     sendAdminOrderAlert(createdOrder).catch(e => console.warn('Admin alert email err:', e.message));
+
+    // Real-time SSE event & cache invalidation
+    eventBus.broadcast('order_created', {
+      orderRef: createdOrder.order_ref,
+      customerName: createdOrder.customer_name,
+      amount: createdOrder.total_amount,
+      paymentMethod: createdOrder.payment_method,
+      status: createdOrder.status
+    });
+    invalidateAnalyticsCache();
 
     res.status(201).json({ message: 'Order placed successfully', order: createdOrder });
   } catch (error) {

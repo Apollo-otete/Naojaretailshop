@@ -17,7 +17,7 @@ export default function CartPage() {
       <Layout>
         <div className="max-w-7xl mx-auto px-4 py-16 text-center">
           <ShoppingBag className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-          <h1 className="font-serif text-3xl font-bold text-gray-900 mb-2">Your Cart is Empty</h1>
+          <h1 className="font-display text-3xl font-extrabold text-gray-950 mb-2">Your Cart is Empty</h1>
           <p className="text-gray-500 mb-6">Explore our categories to add electronic and electrical products.</p>
           <Link to="/" className="btn-primary inline-flex">
             Continue Shopping
@@ -37,7 +37,7 @@ export default function CartPage() {
           <span className="text-gray-900">Cart</span>
         </div>
 
-        <h1 className="font-serif text-3xl font-bold text-gray-900 mb-6">Shopping Cart</h1>
+        <h1 className="font-display text-3xl font-extrabold text-gray-950 mb-6">Shopping Cart</h1>
 
         <div className="grid lg:grid-cols-5 gap-8 pb-8">
           {/* Cart Items */}
@@ -46,10 +46,10 @@ export default function CartPage() {
               {items.map((item) => (
                 <div
                   key={item.product.id}
-                  className="grid grid-cols-[80px_1fr_auto] sm:grid-cols-[96px_1fr_auto] gap-4 p-4 sm:p-5 items-center"
+                  className="flex sm:grid sm:grid-cols-[96px_1fr_auto] gap-3 sm:gap-4 p-3.5 sm:p-5 items-start sm:items-center"
                 >
                   {/* Image */}
-                  <div className="w-20 h-20 sm:w-24 sm:h-24 bg-surface border border-gray-200 rounded-xl overflow-hidden flex items-center justify-center shrink-0">
+                  <div className="w-16 h-16 sm:w-24 sm:h-24 bg-surface border border-gray-200 rounded-xl overflow-hidden flex items-center justify-center shrink-0">
                     {item.product.image_url ? (
                       <img
                         src={item.product.image_url}
@@ -64,16 +64,33 @@ export default function CartPage() {
                   </div>
 
                   {/* Info */}
-                  <div>
-                    <h3 className="font-bold text-gray-900 text-sm sm:text-base line-clamp-2">{item.product.name}</h3>
-                    <p className="text-xs text-gray-400 mt-0.5">{item.product.brand}</p>
-                    <p className="text-sm font-semibold text-gray-700 mt-2">
+                  <div className="flex-1 min-w-0">
+                    <h3 className="font-bold text-gray-900 text-xs sm:text-base line-clamp-2">{item.product.name}</h3>
+                    <p className="text-[11px] sm:text-xs text-gray-400 mt-0.5">{item.product.brand}</p>
+                    <p className="text-xs sm:text-sm font-extrabold text-brand-600 mt-1 sm:mt-2">
                       KSh {item.product.price.toLocaleString()}
                     </p>
+
+                    {/* Mobile-only Quantity and Delete row */}
+                    <div className="sm:hidden flex items-center justify-between gap-2 mt-2 pt-2 border-t border-gray-100">
+                      <QuantityControl
+                        quantity={item.quantity}
+                        onIncrease={() => updateQuantity(item.product.id, item.quantity + 1)}
+                        onDecrease={() => updateQuantity(item.product.id, item.quantity - 1)}
+                        size="sm"
+                      />
+                      <button
+                        onClick={() => removeItem(item.product.id)}
+                        className="text-rose-500 text-xs flex items-center gap-1 hover:text-rose-600 font-semibold p-1 cursor-pointer"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>Remove</span>
+                      </button>
+                    </div>
                   </div>
 
-                  {/* Actions */}
-                  <div className="text-right flex flex-col items-end gap-2.5">
+                  {/* Desktop Actions */}
+                  <div className="hidden sm:flex text-right flex-col items-end gap-2.5">
                     <QuantityControl
                       quantity={item.quantity}
                       onIncrease={() => updateQuantity(item.product.id, item.quantity + 1)}
@@ -96,7 +113,7 @@ export default function CartPage() {
           {/* Order Summary */}
           <div className="lg:col-span-2">
             <div className="bg-white border border-gray-200 rounded-card p-6 sticky top-28 shadow-sm space-y-4">
-              <h2 className="font-serif text-xl font-bold text-gray-900 border-b border-gray-100 pb-2">
+              <h2 className="font-display text-xl font-bold text-gray-900 border-b border-gray-100 pb-2">
                 Order Summary
               </h2>
 

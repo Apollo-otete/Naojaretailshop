@@ -10,6 +10,9 @@ const { initPgTables } = require('./src/config/initPg');
 const app = express();
 const PORT = process.env.PORT || 5000;
 
+// Trust reverse proxy (Nginx, Render, Cloudflare) for accurate client IPs and HTTPS detection
+app.set('trust proxy', 1);
+
 // Ensure uploads dir exists
 const uploadsDir = path.join(__dirname, 'uploads');
 if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
@@ -68,6 +71,7 @@ app.use('/api/auth/login', authLimiter);
 app.use('/api/auth', require('./src/routes/auth'));
 app.use('/api/mpesa/stkpush', mpesaLimiter);
 app.use('/api/mpesa', require('./src/routes/mpesa'));
+app.use('/api/analytics', require('./src/routes/analytics'));
 app.use('/api', require('./src/routes'));
 
 // Global error handler
@@ -80,11 +84,22 @@ app.use((err, req, res, next) => {
 
 // Start server
 const startServer = async () => {
-  await connectDatabases();
-  await initPgTables();
+  // Connect databases - server starts even if DBs are offline
+  try {
+    await connectDatabases();
+  } catch (err) {
+    console.warn('⚠️  Database connection failed (server will still start in offline mode):', err.message);
+  }
+
+  try {
+    await initPgTables();
+  } catch (err) {
+    console.warn('⚠️  PostgreSQL table init skipped (PostgreSQL not available):', err.message);
+  }
   
   const server = app.listen(PORT, () => {
     console.log(`✅ Server running on http://localhost:${PORT}`);
+    console.log(`   Auth endpoint: POST http://localhost:${PORT}/api/auth/login`);
   });
 
   // Graceful shutdown

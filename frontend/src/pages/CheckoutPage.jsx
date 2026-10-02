@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { CheckCircle, ChevronRight, Truck, Store, MapPin, Copy, Check, Smartphone, Loader, AlertCircle } from 'lucide-react';
 import Layout from '../components/Layout';
@@ -203,7 +203,7 @@ export default function CheckoutPage() {
             <CheckCircle className="w-12 h-12 text-green-600" />
           </div>
 
-          <h1 className="font-serif text-3xl font-bold text-gray-900 mb-2">Order Confirmed!</h1>
+          <h1 className="font-display text-3xl font-extrabold text-gray-950 mb-2">Order Confirmed!</h1>
           <p className="text-gray-600 text-sm max-w-md mx-auto mb-6">
             Thank you, <strong className="text-gray-900">{formData.fullName}</strong>. Your order has been received and is being prepared.
           </p>
@@ -287,10 +287,10 @@ export default function CheckoutPage() {
         </div>
 
         {/* Step indicator */}
-        <div className="flex items-center gap-0 mb-8 max-w-sm">
+        <div className="flex items-center w-full max-w-sm mb-8">
           {STEPS.map((label, i) => (
-            <div key={label} className="flex items-center">
-              <div className="flex flex-col items-center">
+            <React.Fragment key={label}>
+              <div className="flex flex-col items-center shrink-0">
                 <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold transition-colors ${
                   step > i + 1 ? 'bg-brand-500 text-white' : step === i + 1 ? 'bg-brand-500 text-white ring-4 ring-brand-100' : 'bg-gray-100 text-gray-400'
                 }`}>
@@ -298,8 +298,10 @@ export default function CheckoutPage() {
                 </div>
                 <span className={`text-[11px] mt-1 ${step === i + 1 ? 'text-gray-900 font-medium' : 'text-gray-400'}`}>{label}</span>
               </div>
-              {i < STEPS.length - 1 && <div className={`h-0.5 w-14 mx-1 mb-5 transition-colors ${step > i + 1 ? 'bg-brand-500' : 'bg-gray-200'}`} />}
-            </div>
+              {i < STEPS.length - 1 && (
+                <div className={`flex-1 h-0.5 mx-2 mb-5 transition-colors ${step > i + 1 ? 'bg-brand-500' : 'bg-gray-200'}`} />
+              )}
+            </React.Fragment>
           ))}
         </div>
 
@@ -316,7 +318,7 @@ export default function CheckoutPage() {
             {step === 1 && (
               <div className="bg-white border border-gray-200 rounded-card p-5 sm:p-6 shadow-sm space-y-5">
                 <div>
-                  <h2 className="font-serif text-xl font-bold text-gray-900">Your Contact & Delivery Info</h2>
+                  <h2 className="font-display text-xl font-bold text-gray-900">Your Contact & Delivery Info</h2>
                   <p className="text-xs text-gray-400">Please provide accurate contact details for M-Pesa prompt and delivery.</p>
                 </div>
 
@@ -358,7 +360,7 @@ export default function CheckoutPage() {
                 <hr className="border-gray-100" />
 
                 <div>
-                  <h2 className="font-serif text-xl font-bold text-gray-900">Fulfillment Method</h2>
+                  <h2 className="font-display text-xl font-bold text-gray-900">Fulfillment Method</h2>
                   <p className="text-xs text-gray-400">Choose how you want to receive your items.</p>
                 </div>
 
@@ -433,7 +435,7 @@ export default function CheckoutPage() {
             {step === 2 && (
               <div className="bg-white border border-gray-200 rounded-card p-5 sm:p-6 shadow-sm space-y-5">
                 <div>
-                  <h2 className="font-serif text-xl font-bold text-gray-900">Pay via M-Pesa</h2>
+                  <h2 className="font-display text-xl font-bold text-gray-900">Pay via M-Pesa</h2>
                   <p className="text-xs text-gray-400">Trigger an instant prompt to your phone or pay directly to our Till.</p>
                 </div>
 
@@ -520,7 +522,7 @@ export default function CheckoutPage() {
             {step === 3 && (
               <div className="bg-white border border-gray-200 rounded-card p-5 sm:p-6 shadow-sm space-y-5">
                 <div>
-                  <h2 className="font-serif text-xl font-bold text-gray-900">Review & Confirm</h2>
+                  <h2 className="font-display text-xl font-bold text-gray-900">Review & Confirm</h2>
                   <p className="text-xs text-gray-400">Please review your order details before final submission.</p>
                 </div>
 
@@ -569,7 +571,7 @@ export default function CheckoutPage() {
           {/* Order Summary sidebar */}
           <div className="lg:col-span-2">
             <div className="bg-white border border-gray-200 rounded-card p-5 sticky top-28 shadow-sm space-y-4">
-              <h3 className="font-serif text-lg font-bold text-gray-900 border-b border-gray-100 pb-2">Order Overview</h3>
+              <h3 className="font-display text-lg font-bold text-gray-900 border-b border-gray-100 pb-2">Order Overview</h3>
               <div className="space-y-3 max-h-48 overflow-y-auto">
                 {items.map((item) => (
                   <div key={item.product.id} className="flex justify-between text-xs items-center">

@@ -63,6 +63,14 @@ export default function Header() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
+  useEffect(() => {
+    function handleOpenMobileDrawer() {
+      setMobileMenuOpen(true);
+    }
+    window.addEventListener('open-mobile-categories', handleOpenMobileDrawer);
+    return () => window.removeEventListener('open-mobile-categories', handleOpenMobileDrawer);
+  }, []);
+
   const handleSearchSubmit = (e) => {
     if (e.key === 'Enter' || e.type === 'click') {
       if (searchQuery.trim()) {
@@ -74,11 +82,11 @@ export default function Header() {
     }
   };
 
-  const whatsappNumber = import.meta.env.VITE_WHATSAPP_NUMBER || '254712345678';
+  const whatsappNumber = import.meta.env.VITE_WHATSAPP_NUMBER || '2541122079767';
 
   return (
     <>
-      {/* ── 1. TOP ANNOUNCEMENT & TRUST STRIP (Jumia / Kilimall Style) ── */}
+      {/* ── 1. TOP ANNOUNCEMENT & TRUST STRIP ── */}
       <div className="bg-[#1e2329] text-gray-200 text-xs py-1.5 border-b border-gray-800">
         <div className="max-w-7xl mx-auto px-4 flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-4 text-[11px] font-medium tracking-wide">
@@ -118,7 +126,7 @@ export default function Header() {
         </div>
       </div>
 
-      {/* ── 2. MAIN MARKETPLACE HEADER (Kilimall / AliExpress / Jumia Style) ── */}
+      {/* ── 2. MAIN MARKETPLACE HEADER ── */}
       <header className="sticky top-0 z-40 bg-white border-b border-gray-200 shadow-sm">
         <div className="max-w-7xl mx-auto px-4">
           <div className="h-18 lg:h-20 flex items-center justify-between gap-3 lg:gap-8">
@@ -143,7 +151,7 @@ export default function Header() {
               </Link>
             </div>
 
-            {/* Prominent Search Bar (Kilimall / Jumia Style) */}
+            {/* Prominent Search Bar */}
             <div className="flex-1 max-w-2xl hidden md:flex items-center">
               <div className="w-full flex items-center border-2 border-brand-500 rounded-xl overflow-hidden shadow-sm hover:border-brand-600 transition-colors bg-white">
                 <div className="pl-4 pr-2 text-gray-400">
@@ -236,7 +244,7 @@ export default function Header() {
           </div>
         </div>
 
-        {/* ── 3. SUB-NAVBAR CATEGORY BAR (AliExpress / Kilimall Style) ── */}
+        {/* ── 3. SUB-NAVBAR CATEGORY BAR ── */}
         <div className="bg-gray-50 border-t border-gray-200 hidden md:block">
           <div className="max-w-7xl mx-auto px-4 flex items-center justify-between">
             
@@ -334,7 +342,13 @@ export default function Header() {
       {/* ── MOBILE SLIDE-OUT MENU ── */}
       {mobileMenuOpen && (
         <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm md:hidden flex">
-          <div className="w-4/5 max-w-sm bg-white h-full overflow-y-auto flex flex-col shadow-2xl">
+          <div 
+            className="w-4/5 max-w-sm bg-white h-full overflow-y-auto flex flex-col shadow-2xl"
+            style={{ 
+              paddingTop: 'env(safe-area-inset-top)', 
+              paddingBottom: 'env(safe-area-inset-bottom)' 
+            }}
+          >
             <div className="p-4 bg-brand-500 text-white flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <div className="w-8 h-8 rounded-lg bg-white text-brand-600 font-black flex items-center justify-center">

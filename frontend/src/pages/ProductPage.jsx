@@ -87,7 +87,7 @@ export default function ProductPage() {
   }
 
   // Construct WhatsApp inquiry link
-  const whatsappNumber = import.meta.env.VITE_WHATSAPP_NUMBER || '254712345678';
+  const whatsappNumber = import.meta.env.VITE_WHATSAPP_NUMBER || '2541122079767';
   const encodedMessage = encodeURIComponent(
     `Hello Naoja Ventures, I am inquiring about the product: ${product.name} (Price: KSh ${product.price.toLocaleString()}). Is it currently in stock?`
   );
@@ -156,7 +156,7 @@ export default function ProductPage() {
 
               {/* Title & Brand */}
               <div>
-                <h1 className="font-serif text-2xl lg:text-3xl font-bold text-gray-900 leading-tight">
+                <h1 className="font-display text-2xl lg:text-3xl font-extrabold text-gray-950 leading-tight">
                   {product.name}
                 </h1>
                 <p className="text-xs text-gray-400 mt-1 uppercase font-semibold tracking-wider">
@@ -253,14 +253,14 @@ export default function ProductPage() {
 
             {/* Specifications Box */}
             {product.specifications && Object.keys(product.specifications).length > 0 && (
-              <div className="bg-white border border-gray-200 rounded-card p-6 shadow-sm">
-                <h3 className="font-serif text-lg font-bold text-gray-900 mb-3 border-b border-gray-100 pb-2">
+              <div className="bg-white border border-gray-200 rounded-card p-4 sm:p-6 shadow-sm">
+                <h3 className="font-display text-base sm:text-lg font-bold text-gray-900 mb-3 border-b border-gray-100 pb-2">
                   Technical Specifications
                 </h3>
-                <div className="text-sm space-y-2">
+                <div className="text-xs sm:text-sm space-y-2">
                   {Object.entries(product.specifications).map(([key, value]) => (
-                    <div key={key} className="flex justify-between py-1 border-b border-gray-50 last:border-b-0">
-                      <strong className="text-gray-600 font-medium">{key}</strong>
+                    <div key={key} className="flex flex-wrap items-center justify-between gap-2 py-1.5 border-b border-gray-50 last:border-b-0">
+                      <strong className="text-gray-700 font-medium">{key}</strong>
                       <span className="text-gray-500 text-right">{value}</span>
                     </div>
                   ))}
@@ -270,11 +270,41 @@ export default function ProductPage() {
           </div>
         </div>
 
+        {/* Mobile Sticky Add to Cart Bar */}
+        <div 
+          className="md:hidden fixed bottom-14 left-0 right-0 z-30 bg-white/95 backdrop-blur-md border-t border-gray-200/90 px-4 py-2.5 shadow-lg flex items-center justify-between gap-3"
+        >
+          <div className="flex flex-col">
+            <span className="text-[10px] text-gray-500 font-bold uppercase">Total Price</span>
+            <span className="text-sm font-black text-brand-600 leading-tight">
+              KSh {(product.price * quantity).toLocaleString()}
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleAddToCart}
+              disabled={added || product.in_stock === false || product.stock_status === 'Out of Stock'}
+              className="h-10 px-3.5 rounded-xl bg-brand-500 text-white font-bold text-xs flex items-center gap-1.5 shadow-sm active:scale-95 disabled:bg-gray-100 disabled:text-gray-400 touch-manipulation cursor-pointer"
+            >
+              <ShoppingBag className="w-4 h-4" />
+              <span>{added ? 'Added!' : 'Cart'}</span>
+            </button>
+            <button
+              onClick={handleBuyNow}
+              disabled={product.in_stock === false || product.stock_status === 'Out of Stock'}
+              className="h-10 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-sm active:scale-95 disabled:bg-gray-100 disabled:text-gray-400 touch-manipulation cursor-pointer"
+            >
+              <Zap className="w-4 h-4" />
+              <span>Buy Now</span>
+            </button>
+          </div>
+        </div>
+
         {/* Related Products Section */}
         {relatedProducts.length > 0 && (
-          <div className="py-12 border-t border-gray-100">
-            <h2 className="font-serif text-2xl font-bold text-gray-900 mb-6">Related Products</h2>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+          <div className="py-8 sm:py-12 border-t border-gray-100">
+            <h2 className="font-display text-xl sm:text-2xl font-bold text-gray-900 mb-6">Related Products</h2>
+            <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-6">
               {relatedProducts.map((p) => (
                 <ProductCard key={p.id} product={p} />
               ))}

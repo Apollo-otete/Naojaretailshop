@@ -79,7 +79,7 @@ export default function HomePage() {
   const [loading, setLoading] = useState(true);
   const [currentSlide, setCurrentSlide] = useState(0);
 
-  // Countdown timer for Flash Deals (AliExpress / Jumia style)
+  // Countdown timer for Flash Deals
   const [timeLeft, setTimeLeft] = useState({ hours: 4, minutes: 35, seconds: 22 });
 
   // Newsletter state
@@ -189,7 +189,7 @@ export default function HomePage() {
   const solarProducts = products.filter(p => p.category_id === 8 || p.category_slug === 'renewable-energy' || (p.name && p.name.toLowerCase().includes('solar')));
   const phoneProducts = products.filter(p => p.category_id === 1 || p.category_slug === 'mobile-phones' || (p.name && p.name.toLowerCase().includes('phone')));
 
-  const whatsappNumber = import.meta.env.VITE_WHATSAPP_NUMBER || '254712345678';
+  const whatsappNumber = import.meta.env.VITE_WHATSAPP_NUMBER || '2541122079767';
 
   return (
     <Layout>
@@ -202,11 +202,11 @@ export default function HomePage() {
         <div className="max-w-7xl mx-auto px-3 sm:px-4 space-y-6">
 
           {/* ══════════════════════════════════════════════════════════════════════
-              SECTION 1: THE ICONIC 3-COLUMN MARKETPLACE HERO (Kilimall / Alibaba Style)
+              SECTION 1: THE 3-COLUMN MARKETPLACE HERO
              ══════════════════════════════════════════════════════════════════════ */}
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
             
-            {/* Left Column: Vertical Category Menu (Kilimall / Alibaba Style) */}
+            {/* Left Column: Vertical Category Menu */}
             <aside className="hidden lg:block lg:col-span-3 bg-white rounded-xl border border-gray-200/80 shadow-sm p-2 flex flex-col justify-between">
               <div className="space-y-0.5">
                 <div className="px-3 py-2 text-xs font-black uppercase tracking-wider text-gray-500 border-b border-gray-100 flex items-center justify-between">
@@ -323,53 +323,54 @@ export default function HomePage() {
               </div>
             </div>
 
-            {/* Right Column: Quick Value & Trust Cards (Alibaba / Jumia Style) */}
-            <div className="lg:col-span-3 flex flex-col gap-3">
+            {/* Right Column: Quick Value & Trust Cards (2x2 on mobile, vertical stack on desktop) */}
+            <div className="lg:col-span-3 grid grid-cols-2 lg:flex lg:flex-col gap-2.5 sm:gap-3">
               
               {/* Card 1: Fast M-Pesa STK Push */}
-              <div className="bg-white p-4 rounded-xl border border-gray-200/80 shadow-sm flex items-start gap-3.5 hover:shadow-md transition-shadow">
-                <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0 border border-emerald-100">
-                  <CreditCard className="w-5 h-5" />
+              <div className="bg-white p-3 sm:p-4 rounded-xl border border-gray-200/80 shadow-sm flex flex-col sm:flex-row items-start gap-2 sm:gap-3.5 hover:shadow-md transition-shadow">
+                <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0 border border-emerald-100">
+                  <CreditCard className="w-4 h-4 sm:w-5 sm:h-5" />
                 </div>
                 <div>
-                  <h3 className="font-extrabold text-xs text-gray-900 uppercase tracking-wide">M-Pesa Express</h3>
-                  <p className="text-[11px] text-gray-500 mt-0.5">Prompt appears right on your phone. Safe, zero errors.</p>
-                  <span className="text-[10px] text-emerald-600 font-extrabold mt-1 inline-block">Till 4149288</span>
+                  <h3 className="font-extrabold text-[11px] sm:text-xs text-gray-900 uppercase tracking-wide">Instant M-Pesa</h3>
+                  <p className="text-[10px] sm:text-[11px] text-gray-500 mt-0.5 line-clamp-2">Prompt appears on your phone.</p>
+                  <span className="text-[9px] sm:text-[10px] text-emerald-600 font-extrabold mt-0.5 inline-block">Till 4149288</span>
                 </div>
               </div>
 
               {/* Card 2: Lurambi Store Pickup */}
-              <div className="bg-white p-4 rounded-xl border border-gray-200/80 shadow-sm flex items-start gap-3.5 hover:shadow-md transition-shadow">
-                <div className="w-10 h-10 rounded-xl bg-orange-50 text-brand-600 flex items-center justify-center shrink-0 border border-brand-100">
-                  <ShoppingBag className="w-5 h-5" />
+              <div className="bg-white p-3 sm:p-4 rounded-xl border border-gray-200/80 shadow-sm flex flex-col sm:flex-row items-start gap-2 sm:gap-3.5 hover:shadow-md transition-shadow">
+                <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-orange-50 text-brand-600 flex items-center justify-center shrink-0 border border-brand-100">
+                  <ShoppingBag className="w-4 h-4 sm:w-5 sm:h-5" />
                 </div>
                 <div>
-                  <h3 className="font-extrabold text-xs text-gray-900 uppercase tracking-wide">Store Pickup</h3>
-                  <p className="text-[11px] text-gray-500 mt-0.5">Ready in 1-2 hours. Opp. Bamboo, Lurambi, Kakamega.</p>
-                  <span className="text-[10px] text-brand-600 font-extrabold mt-1 inline-block">Free Pickup</span>
+                  <h3 className="font-extrabold text-[11px] sm:text-xs text-gray-900 uppercase tracking-wide">Store Pickup</h3>
+                  <p className="text-[10px] sm:text-[11px] text-gray-500 mt-0.5 line-clamp-2">Ready in 1h. Opp. Bamboo.</p>
+                  <span className="text-[9px] sm:text-[10px] text-brand-600 font-extrabold mt-0.5 inline-block">Free Pickup</span>
                 </div>
               </div>
 
               {/* Card 3: Fast Delivery in Kakamega */}
-              <div className="bg-white p-4 rounded-xl border border-gray-200/80 shadow-sm flex items-start gap-3.5 hover:shadow-md transition-shadow">
-                <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center shrink-0 border border-blue-100">
-                  <Truck className="w-5 h-5" />
+              <div className="bg-white p-3 sm:p-4 rounded-xl border border-gray-200/80 shadow-sm flex flex-col sm:flex-row items-start gap-2 sm:gap-3.5 hover:shadow-md transition-shadow">
+                <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center shrink-0 border border-blue-100">
+                  <Truck className="w-4 h-4 sm:w-5 sm:h-5" />
                 </div>
                 <div>
-                  <h3 className="font-extrabold text-xs text-gray-900 uppercase tracking-wide">Same-Day Delivery</h3>
-                  <p className="text-[11px] text-gray-500 mt-0.5">Direct dispatch in Kakamega town, MMUST & environs.</p>
-                  <span className="text-[10px] text-blue-600 font-extrabold mt-1 inline-block">Free &ge; KSh 600</span>
+                  <h3 className="font-extrabold text-[11px] sm:text-xs text-gray-900 uppercase tracking-wide">Same-Day Dispatch</h3>
+                  <p className="text-[10px] sm:text-[11px] text-gray-500 mt-0.5 line-clamp-2">Within Kakamega & MMUST.</p>
+                  <span className="text-[9px] sm:text-[10px] text-blue-600 font-extrabold mt-0.5 inline-block">Kakamega Town</span>
                 </div>
               </div>
 
               {/* Card 4: Verified Warranty */}
-              <div className="bg-white p-4 rounded-xl border border-gray-200/80 shadow-sm flex items-start gap-3.5 hover:shadow-md transition-shadow">
-                <div className="w-10 h-10 rounded-xl bg-purple-50 text-purple-600 flex items-center justify-center shrink-0 border border-purple-100">
-                  <ShieldCheck className="w-5 h-5" />
+              <div className="bg-white p-3 sm:p-4 rounded-xl border border-gray-200/80 shadow-sm flex flex-col sm:flex-row items-start gap-2 sm:gap-3.5 hover:shadow-md transition-shadow">
+                <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-purple-50 text-purple-600 flex items-center justify-center shrink-0 border border-purple-100">
+                  <ShieldCheck className="w-4 h-4 sm:w-5 sm:h-5" />
                 </div>
                 <div>
-                  <h3 className="font-extrabold text-xs text-gray-900 uppercase tracking-wide">Genuine Warranty</h3>
-                  <p className="text-[11px] text-gray-500 mt-0.5">Every device tested before packing with replacement guarantee.</p>
+                  <h3 className="font-extrabold text-[11px] sm:text-xs text-gray-900 uppercase tracking-wide">Genuine Warranty</h3>
+                  <p className="text-[10px] sm:text-[11px] text-gray-500 mt-0.5 line-clamp-2">Tested before packing.</p>
+                  <span className="text-[9px] sm:text-[10px] text-purple-600 font-extrabold mt-0.5 inline-block">100% Guaranteed</span>
                 </div>
               </div>
             </div>
@@ -377,7 +378,7 @@ export default function HomePage() {
           </div>
 
           {/* ══════════════════════════════════════════════════════════════════════
-              SECTION 2: CIRCULAR DEPARTMENT BADGES ROW (Kilimall Style)
+              SECTION 2: CIRCULAR DEPARTMENT BADGES ROW
              ══════════════════════════════════════════════════════════════════════ */}
           <div className="bg-white p-4 rounded-xl border border-gray-200/80 shadow-sm">
             <div className="grid grid-cols-4 sm:grid-cols-8 gap-3 sm:gap-4 text-center">
@@ -399,7 +400,7 @@ export default function HomePage() {
           </div>
 
           {/* ══════════════════════════════════════════════════════════════════════
-              SECTION 3: SUPERDEALS & FLASH SALES STRIP (AliExpress / Jumia Style)
+              SECTION 3: SUPERDEALS & FLASH SALES STRIP
              ══════════════════════════════════════════════════════════════════════ */}
           <section id="flash-sales" className="bg-white rounded-xl border border-gray-200/80 shadow-sm overflow-hidden">
             {/* Header with live timer */}

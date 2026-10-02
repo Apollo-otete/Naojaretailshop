@@ -111,14 +111,14 @@ export default function Footer() {
               </div>
               <div className="flex items-center gap-2">
                 <Phone className="w-3.5 h-3.5 text-brand-400" />
-                <a href="tel:0704812343" className="hover:text-brand-400 transition-colors font-medium">0704 812 343</a>
+                <a href="tel:0112079767" className="hover:text-brand-400 transition-colors font-medium">0112 079 767</a>
               </div>
               <div className="flex items-center gap-2">
                 <Mail className="w-3.5 h-3.5 text-brand-400" />
-                <a href="mailto:enquiries@naojaventures.com" className="hover:text-brand-400 transition-colors">enquiries@naojaventures.com</a>
+                <a href="mailto:naojaventures@gmail.com" className="hover:text-brand-400 transition-colors">naojaventures@gmail.com</a>
               </div>
               <a
-                href="https://wa.me/254704812343"
+                href={`https://wa.me/${import.meta.env.VITE_WHATSAPP_NUMBER || '2541122079767'}`}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="inline-flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg mt-1 transition-colors"

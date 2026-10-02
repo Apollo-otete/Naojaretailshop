@@ -749,13 +749,16 @@ function handleLocalFallback(endpoint, options = {}) {
 
   // Auth Fallback
   if (endpoint.startsWith('/api/auth/login') && method === 'POST') {
-    if (body.email === 'admin@naojaventures.com' && body.password === 'admin123') {
+    const cleanEmail = (body.email || '').trim().toLowerCase();
+    const cleanPass = body.password || '';
+
+    if (cleanEmail === 'naojaventures@gmail.com' && cleanPass === 'naoja@1540') {
       return {
-        token: 'mock_jwt_token_123456789',
-        admin: { id: 1, name: 'Super Admin', email: 'admin@naojaventures.com' }
+        token: 'naoja_jwt_token_admin_owner_' + Date.now(),
+        admin: { id: 1, name: 'Naoja Store Owner', email: 'naojaventures@gmail.com' }
       };
     }
-    throw new Error('Invalid credentials');
+    throw new Error('Invalid email or password. Please check your credentials.');
   }
 
   if (endpoint.startsWith('/api/auth/change-password') && method === 'PUT') {
@@ -813,7 +816,7 @@ function handleLocalFallback(endpoint, options = {}) {
 
 async function request(endpoint, options = {}) {
   const url = `${BASE_URL}${endpoint}`;
-  const token = localStorage.getItem('adminToken');
+  const token = sessionStorage.getItem('adminToken') || localStorage.getItem('adminToken');
   const headers = {
     'Content-Type': 'application/json',
     ...(token && { 'Authorization': `Bearer ${token}` }),

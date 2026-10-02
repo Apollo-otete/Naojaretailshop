@@ -29,8 +29,24 @@ import {
   ImageIcon,
   LogOut,
   Key,
-  Lock
+  Lock,
+  Activity,
+  Sparkles,
+  CreditCard,
+  Truck,
+  BellRing,
+  PackageSearch,
+  Radio
 } from 'lucide-react';
+import { analyticsApi } from '../lib/analyticsApi';
+import { SSEClient } from '../lib/sse';
+import LiveOverviewTab from '../components/admin/LiveOverviewTab';
+import SalesAnalyticsTab from '../components/admin/SalesAnalyticsTab';
+import InventoryIntelligenceTab from '../components/admin/InventoryIntelligenceTab';
+import ForecastPlanningTab from '../components/admin/ForecastPlanningTab';
+import PaymentHealthTab from '../components/admin/PaymentHealthTab';
+import FulfillmentTab from '../components/admin/FulfillmentTab';
+import AlertsCentreTab from '../components/admin/AlertsCentreTab';
 
 export default function AdminDashboard() {
   const [activeTab, setActiveTab] = useState('overview');
@@ -44,6 +60,25 @@ export default function AdminDashboard() {
     recentOrders: [],
     monthlySales: []
   });
+
+  // Business Intelligence & Live Monitor States
+  const [salesRange, setSalesRange] = useState('week');
+  const [paymentRange, setPaymentRange] = useState('month');
+  const [fulfillmentRange, setFulfillmentRange] = useState('month');
+  const [soundEnabled, setSoundEnabled] = useState(true);
+
+  const [liveAnalytics, setLiveAnalytics] = useState(null);
+  const [liveEvents, setLiveEvents] = useState([]);
+  const [salesSummary, setSalesSummary] = useState(null);
+  const [categoryAnalytics, setCategoryAnalytics] = useState([]);
+  const [inventoryHealth, setInventoryHealth] = useState([]);
+  const [forecastData, setForecastData] = useState(null);
+  const [insightsData, setInsightsData] = useState([]);
+  const [targetData, setTargetData] = useState(null);
+  const [paymentData, setPaymentData] = useState(null);
+  const [fulfillmentData, setFulfillmentData] = useState(null);
+  const [alertsData, setAlertsData] = useState([]);
+  const [analyticsLoading, setAnalyticsLoading] = useState(false);
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
   const [orders, setOrders] = useState([]);
@@ -131,9 +166,128 @@ export default function AdminDashboard() {
     }
   };
 
+  // Web Audio Synthesizer Chime for Live Daraja M-Pesa notifications
+  const playChime = () => {
+    try {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(587.33, ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.15);
+      gain.gain.setValueAtTime(0.12, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.35);
+    } catch (e) {
+      // Audio autoplay policy
+    }
+  };
+
+  const fetchAllAnalytics = async () => {
+    setAnalyticsLoading(true);
+    try {
+      const [
+        liveRes,
+        summaryRes,
+        catRes,
+        invRes,
+        fcRes,
+        insRes,
+        tgtRes,
+        payRes,
+        fulRes,
+        altRes
+      ] = await Promise.all([
+        analyticsApi.getLive(),
+        analyticsApi.getSummary(salesRange),
+        analyticsApi.getCategoryPerformance(salesRange),
+        analyticsApi.getInventoryHealth(),
+        analyticsApi.getRevenueForecast(30),
+        analyticsApi.getInsights(),
+        analyticsApi.getTargetProgress('month'),
+        analyticsApi.getPaymentHealth(paymentRange),
+        analyticsApi.getFulfillment(fulfillmentRange),
+        analyticsApi.getAlerts()
+      ]);
+
+      if (liveRes) {
+        setLiveAnalytics(liveRes);
+        if (liveRes.recentEvents && liveRes.recentEvents.length > 0) {
+          setLiveEvents(prev => prev.length === 0 ? liveRes.recentEvents : prev);
+        }
+      }
+      if (summaryRes) setSalesSummary(summaryRes);
+      if (catRes) setCategoryAnalytics(catRes);
+      if (invRes) setInventoryHealth(invRes);
+      if (fcRes) setForecastData(fcRes);
+      if (insRes) setInsightsData(insRes);
+      if (tgtRes) setTargetData(tgtRes);
+      if (payRes) setPaymentData(payRes);
+      if (fulRes) setFulfillmentData(fulRes);
+      if (altRes) setAlertsData(altRes);
+    } catch (err) {
+      console.warn('Analytics loading error (fallback handled):', err);
+    } finally {
+      setAnalyticsLoading(false);
+    }
+  };
+
   useEffect(() => {
     fetchData();
+    fetchAllAnalytics();
   }, []);
+
+  // Real-time SSE stream hook
+  useEffect(() => {
+    const streamUrl = analyticsApi.getStreamUrl();
+    const sse = new SSEClient(
+      streamUrl,
+      (evt) => {
+        setLiveEvents((prev) => [
+          {
+            id: evt.id || `ev-${Date.now()}`,
+            type: evt.type || 'system',
+            message: evt.message || (evt.data ? JSON.stringify(evt.data) : 'Customer activity'),
+            time: 'Just now',
+            amount: evt.amount || null,
+            orderRef: evt.orderRef || evt.order_ref || null
+          },
+          ...prev.slice(0, 29)
+        ]);
+
+        analyticsApi.getLive().then(setLiveAnalytics).catch(() => {});
+        if (soundEnabled && (evt.type === 'payment_received' || evt.type === 'order_created')) {
+          playChime();
+        }
+      },
+      (err) => {
+        // SSE reconnect handled internally
+      }
+    );
+
+    sse.connect();
+    return () => {
+      sse.disconnect();
+    };
+  }, [soundEnabled]);
+
+  useEffect(() => {
+    analyticsApi.getSummary(salesRange).then(setSalesSummary).catch(() => {});
+    analyticsApi.getCategoryPerformance(salesRange).then(setCategoryAnalytics).catch(() => {});
+  }, [salesRange]);
+
+  useEffect(() => {
+    analyticsApi.getPaymentHealth(paymentRange).then(setPaymentData).catch(() => {});
+  }, [paymentRange]);
+
+  useEffect(() => {
+    analyticsApi.getFulfillment(fulfillmentRange).then(setFulfillmentData).catch(() => {});
+  }, [fulfillmentRange]);
 
   // Sync Analytics with local updates
   const refreshAnalytics = (updatedProducts = products, updatedOrders = orders, updatedSubscribers = subscribers, updatedMessages = messages) => {
@@ -386,9 +540,20 @@ export default function AdminDashboard() {
 
   // Handle logout
   const handleLogout = () => {
+    sessionStorage.removeItem('adminToken');
+    sessionStorage.removeItem('adminInfo');
     localStorage.removeItem('adminToken');
     localStorage.removeItem('adminInfo');
     window.location.href = '/admin/login';
+  };
+
+  // Return to Storefront (Lock session so returning requires re-entering credentials)
+  const handleBackToStore = () => {
+    sessionStorage.removeItem('adminToken');
+    sessionStorage.removeItem('adminInfo');
+    localStorage.removeItem('adminToken');
+    localStorage.removeItem('adminInfo');
+    window.location.href = '/';
   };
 
   // Handle image file upload
@@ -411,9 +576,19 @@ export default function AdminDashboard() {
     }
   };
 
-  // Sidebar Menu Items
-  const menuItems = [
-    { id: 'overview', label: 'Overview', icon: LayoutDashboard },
+  const unacknowledgedAlertsCount = alertsData.filter(a => !a.acknowledged && (a.severity === 'critical' || a.severity === 'warning')).length;
+
+  const biMenuItems = [
+    { id: 'overview', label: 'Live Command', icon: Activity, liveDot: true },
+    { id: 'sales_analytics', label: 'Sales & Revenue', icon: TrendingUp },
+    { id: 'forecast', label: 'Predictive Forecast', icon: Sparkles },
+    { id: 'inventory_intel', label: 'Stock Intelligence', icon: PackageSearch, badge: stats.lowStockCount ? `${stats.lowStockCount} low` : null, badgeColor: 'bg-amber-500' },
+    { id: 'payment_health', label: 'M-Pesa Diagnostics', icon: CreditCard },
+    { id: 'fulfillment', label: 'Logistics Funnel', icon: Truck },
+    { id: 'alerts', label: 'Alerts Centre', icon: BellRing, badge: unacknowledgedAlertsCount ? unacknowledgedAlertsCount : null, badgeColor: 'bg-rose-600' }
+  ];
+
+  const storeMenuItems = [
     { id: 'products', label: 'Products', icon: ShoppingBag, badge: stats.lowStockCount ? stats.lowStockCount : null },
     { id: 'categories', label: 'Categories', icon: FolderTree },
     { id: 'orders', label: 'Orders', icon: Receipt },
@@ -437,85 +612,176 @@ export default function AdminDashboard() {
   });
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col font-sans">
+    <div className="min-h-screen flex flex-col font-sans" style={{background: 'linear-gradient(135deg, #f0f4ff 0%, #f8f9fc 50%, #f0f7f4 100%)'}}>
       
       {/* Top Banner Navigation */}
-      <header className="bg-white border-b border-gray-200 h-16 shrink-0 flex items-center justify-between px-4 sticky top-0 z-20">
+      <header className="bg-white/95 backdrop-blur-md border-b border-gray-200/80 h-16 shrink-0 flex items-center justify-between px-4 lg:px-6 sticky top-0 z-30 shadow-xs">
         <div className="flex items-center gap-3">
           <button 
             onClick={() => setSidebarOpen(!sidebarOpen)}
-            className="p-1.5 hover:bg-gray-100 rounded-lg lg:hidden"
+            className="p-2 hover:bg-gray-100 rounded-xl lg:hidden text-gray-600 transition-colors"
+            aria-label="Toggle navigation menu"
           >
-            <Menu className="w-6 h-6 text-gray-700" />
+            <Menu className="w-5 h-5" />
           </button>
-          <span className="font-serif text-xl font-bold text-brand-600 flex items-center gap-2">
-            Naoja Ventures <span className="bg-brand-100 text-brand-800 text-[10px] uppercase font-bold px-2 py-0.5 rounded-full">Admin</span>
-          </span>
+          
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-brand-600 to-[#ff6b00] flex items-center justify-center text-white font-display font-black text-lg shadow-sm">
+              N
+            </div>
+            <div className="flex flex-col">
+              <span className="font-display text-base font-extrabold text-gray-950 tracking-tight flex items-center gap-1.5 leading-tight">
+                NAOJA <span className="text-[10px] font-extrabold uppercase bg-brand-500 text-white px-1.5 py-0.5 rounded tracking-normal">Ops Hub</span>
+              </span>
+              <span className="text-[10px] uppercase font-bold tracking-wider text-gray-400 -mt-0.5">
+                Executive & Retail Control
+              </span>
+            </div>
+          </div>
         </div>
 
-        <div className="flex items-center gap-4">
-          <Link to="/" className="text-xs font-semibold text-gray-600 hover:text-brand-600 flex items-center gap-1.5 transition-colors">
+        <div className="flex items-center gap-3 sm:gap-4">
+          <div className="hidden sm:flex items-center gap-2 px-3 py-1 bg-emerald-50 border border-emerald-200/80 rounded-full text-xs font-bold text-emerald-800 shadow-xs">
+            <span className="relative flex h-2 w-2">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+            </span>
+            <span>Daraja SSE Live Stream</span>
+          </div>
+
+          <button
+            onClick={handleBackToStore}
+            className="text-xs font-bold text-gray-600 hover:text-brand-600 bg-gray-50 hover:bg-brand-50/60 border border-gray-200/80 hover:border-brand-200 px-3.5 py-1.5 rounded-xl flex items-center gap-1.5 transition-all shadow-xs"
+            title="Lock session & return to storefront"
+          >
             <ArrowLeft className="w-3.5 h-3.5" />
-            Back to Storefront
-          </Link>
+            <span>Storefront</span>
+          </button>
         </div>
       </header>
 
       <div className="flex flex-1 relative overflow-hidden">
-        
-        {/* Sidebar Navigation */}
-        <aside className={`bg-white border-r border-gray-200 w-64 shrink-0 flex flex-col justify-between py-6 absolute inset-y-0 left-0 z-10 transform lg:static lg:translate-x-0 transition-transform duration-300 ${
-          sidebarOpen ? 'translate-x-0' : '-translate-x-full'
-        }`}>
-          <div className="space-y-1.5 px-3">
-            {menuItems.map((item) => {
-              const Icon = item.icon;
-              return (
-                <button
-                  key={item.id}
-                  onClick={() => {
-                    setActiveTab(item.id);
-                    setSidebarOpen(false);
-                  }}
-                  className={`w-full h-11 px-4 rounded-xl flex items-center justify-between font-semibold text-sm transition-all ${
-                    activeTab === item.id 
-                      ? 'bg-brand-50 text-brand-700 shadow-sm' 
-                      : 'text-gray-600 hover:bg-gray-50'
-                  }`}
-                >
-                  <div className="flex items-center gap-3">
-                    <Icon className={`w-5 h-5 ${activeTab === item.id ? 'text-brand-600' : 'text-gray-400'}`} />
-                    {item.label}
-                  </div>
-                  {item.badge && (
-                    <span className="bg-brand-600 text-white text-[10px] font-extrabold px-2 py-0.5 rounded-full">
-                      {item.badge}
-                    </span>
-                  )}
-                </button>
-              );
-            })}
+        <aside 
+          className={`border-r border-gray-200/60 w-64 shrink-0 flex flex-col justify-between py-5 fixed inset-y-0 left-0 z-50 transform lg:static lg:translate-x-0 transition-transform duration-300 shadow-2xl lg:shadow-none ${
+            sidebarOpen ? 'translate-x-0' : '-translate-x-full'
+          }`} 
+          style={{
+            background: 'linear-gradient(180deg, #ffffff 0%, #fafbff 100%)',
+            paddingTop: 'max(1.25rem, env(safe-area-inset-top))',
+            paddingBottom: 'max(1.25rem, env(safe-area-inset-bottom))'
+          }}
+        >
+          <div className="space-y-5 px-3 overflow-y-auto">
+            {/* Group 1: Executive Analytics */}
+            <div>
+              <div className="px-3 pb-2 flex items-center justify-between">
+                <span className="text-[9px] font-extrabold tracking-widest uppercase" style={{color: '#3B82F6'}}>Executive Analytics</span>
+                <span className="relative flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                </span>
+              </div>
+              <div className="space-y-0.5">
+                {biMenuItems.map((item) => {
+                  const Icon = item.icon;
+                  const isActive = activeTab === item.id;
+                  return (
+                    <button
+                      key={item.id}
+                      onClick={() => {
+                        setActiveTab(item.id);
+                        setSidebarOpen(false);
+                      }}
+                      className={`w-full h-10 px-3.5 rounded-xl flex items-center justify-between font-semibold text-xs transition-all ${
+                        isActive
+                          ? 'text-white shadow-md'
+                          : 'text-gray-600 hover:bg-blue-50/60 hover:text-brand-700'
+                      }`}
+                      style={isActive ? {background: 'linear-gradient(135deg, #1D4ED8 0%, #3B82F6 100%)'} : {}}
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <Icon className={`w-4 h-4 ${isActive ? 'text-white' : 'text-gray-400'}`} />
+                        <span className={isActive ? 'font-bold' : ''}>{item.label}</span>
+                      </div>
+                      {item.liveDot && !item.badge && (
+                        <span className="flex h-2 w-2 relative">
+                          <span className={`animate-ping absolute inline-flex h-full w-full rounded-full ${isActive ? 'bg-white' : 'bg-emerald-400'} opacity-75`}></span>
+                          <span className={`relative inline-flex rounded-full h-2 w-2 ${isActive ? 'bg-white' : 'bg-emerald-500'}`}></span>
+                        </span>
+                      )}
+                      {item.badge && (
+                        <span className={`${isActive ? 'bg-white/20 text-white' : (item.badgeColor || 'bg-brand-600') + ' text-white'} text-[10px] font-extrabold px-1.5 py-0.5 rounded-full`}>
+                          {item.badge}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Divider */}
+            <div className="border-t border-gray-100 mx-3"></div>
+
+            {/* Group 2: Store Operations */}
+            <div>
+              <div className="px-3 pb-2">
+                <span className="text-[9px] font-extrabold tracking-widest uppercase text-gray-400">Store Operations</span>
+              </div>
+              <div className="space-y-0.5">
+                {storeMenuItems.map((item) => {
+                  const Icon = item.icon;
+                  const isActive = activeTab === item.id;
+                  return (
+                    <button
+                      key={item.id}
+                      onClick={() => {
+                        setActiveTab(item.id);
+                        setSidebarOpen(false);
+                      }}
+                      className={`w-full h-10 px-3.5 rounded-xl flex items-center justify-between font-semibold text-xs transition-all ${
+                        isActive
+                          ? 'text-white shadow-md'
+                          : 'text-gray-600 hover:bg-orange-50/60 hover:text-orange-700'
+                      }`}
+                      style={isActive ? {background: 'linear-gradient(135deg, #ea580c 0%, #ff6b00 100%)'} : {}}
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <Icon className={`w-4 h-4 ${isActive ? 'text-white' : 'text-gray-400'}`} />
+                        <span className={isActive ? 'font-bold' : ''}>{item.label}</span>
+                      </div>
+                      {item.badge && (
+                        <span className={`${isActive ? 'bg-white/25 text-white' : 'bg-orange-500 text-white'} text-[10px] font-extrabold px-1.5 py-0.5 rounded-full`}>
+                          {item.badge}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
           </div>
 
-          <div className="px-3 space-y-1">
-            <div className="px-4 pb-2 text-[10px] text-gray-400 font-semibold tracking-wider uppercase">Shop Operations</div>
+          {/* Bottom session controls */}
+          <div className="px-3 pt-4 mx-3 mb-1 border-t border-gray-100/80 space-y-0.5">
+            <div className="px-1 pb-2 text-[9px] text-gray-400 font-extrabold tracking-widest uppercase">Session</div>
             <button
               onClick={() => {
                 setPasswordStatus({ loading: false, error: '', success: '' });
                 setPasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '' });
                 setIsPasswordModalOpen(true);
               }}
-              className="w-full h-10 px-4 rounded-xl flex items-center gap-3 font-semibold text-sm text-gray-700 hover:bg-gray-100 transition-all"
+              className="w-full h-9 px-3.5 rounded-xl flex items-center gap-2.5 font-semibold text-xs text-gray-600 hover:bg-gray-100 transition-all"
             >
-              <Key className="w-4.5 h-4.5 text-gray-500" />
+              <Key className="w-4 h-4 text-gray-400" />
               Change Password
             </button>
             <button
               onClick={handleLogout}
-              className="w-full h-10 px-4 rounded-xl flex items-center gap-3 font-semibold text-sm text-red-500 hover:bg-red-50 transition-all"
+              className="w-full h-9 px-3.5 rounded-xl flex items-center gap-2.5 font-semibold text-xs text-rose-500 hover:bg-rose-50 transition-all"
             >
-              <LogOut className="w-4.5 h-4.5" />
-              Logout
+              <LogOut className="w-4 h-4" />
+              Sign Out
             </button>
           </div>
         </aside>
@@ -524,186 +790,115 @@ export default function AdminDashboard() {
         {sidebarOpen && (
           <div 
             onClick={() => setSidebarOpen(false)} 
-            className="bg-black/20 absolute inset-0 z-0 lg:hidden"
+            className="fixed inset-0 z-40 bg-black/40 backdrop-blur-xs lg:hidden transition-opacity"
+            aria-label="Close sidebar"
           ></div>
         )}
 
         {/* Main Content Area */}
-        <main className="flex-1 overflow-y-auto p-4 lg:p-8">
+        <main className="flex-1 overflow-y-auto p-3 sm:p-5 lg:p-8 naoja-admin-bg">
+          {/* Mobile & Tablet Quick Tab Switcher Bar */}
+          <div className="lg:hidden mb-4 overflow-x-auto no-scrollbar py-0.5 -mx-1 px-1">
+            <div className="flex items-center gap-1.5 w-max">
+              {[...biMenuItems, ...storeMenuItems].map((item) => {
+                const Icon = item.icon;
+                const isActive = activeTab === item.id;
+                return (
+                  <button
+                    key={item.id}
+                    onClick={() => setActiveTab(item.id)}
+                    className={`h-9 px-3 rounded-xl text-xs font-bold flex items-center gap-1.5 shrink-0 transition-all cursor-pointer touch-manipulation ${
+                      isActive
+                        ? 'bg-brand-600 text-white shadow-sm'
+                        : 'bg-white text-gray-700 border border-gray-200 hover:bg-gray-50'
+                    }`}
+                  >
+                    <Icon className={`w-3.5 h-3.5 ${isActive ? 'text-white' : 'text-gray-500'}`} />
+                    <span>{item.label}</span>
+                    {item.badge && (
+                      <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-black ${isActive ? 'bg-white/25 text-white' : 'bg-brand-100 text-brand-700'}`}>
+                        {item.badge}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
           {loading ? (
-            <div className="flex flex-col items-center justify-center py-24 text-gray-400 font-medium space-y-2">
-              <span className="text-sm">Loading database parameters...</span>
+            <div className="flex flex-col items-center justify-center py-24 text-gray-400 font-medium space-y-4">
+              <div className="w-12 h-12 rounded-2xl flex items-center justify-center text-white font-display font-black text-2xl animate-pulse" style={{background: 'linear-gradient(135deg, #1D4ED8, #ff6b00)'}}>
+                N
+              </div>
+              <span className="text-sm font-semibold text-gray-500">Loading Naoja Control Hub...</span>
             </div>
           ) : (
             <>
-              {/* Tab 1: OVERVIEW */}
+              {/* Tab 1: LIVE OVERVIEW / COMMAND CENTRE */}
               {activeTab === 'overview' && (
-                <div className="space-y-6">
-                  <div>
-                    <h1 className="font-serif text-2xl lg:text-3xl font-bold text-gray-900">Dashboard Overview</h1>
-                    <p className="text-sm text-gray-500 mt-1">Real-time telemetry and retail sales statistics.</p>
-                  </div>
+                <LiveOverviewTab
+                  liveData={liveAnalytics}
+                  events={liveEvents}
+                  soundEnabled={soundEnabled}
+                  setSoundEnabled={setSoundEnabled}
+                />
+              )}
 
-                  {/* Stock Warnings */}
-                  {stats.lowStockCount > 0 && (
-                    <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 flex items-start gap-3.5 shadow-sm">
-                      <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
-                      <div>
-                        <h4 className="font-bold text-amber-800 text-sm">Low Stock Alert</h4>
-                        <p className="text-xs text-amber-600 mt-0.5">
-                          There are currently <strong>{stats.lowStockCount}</strong> products running low on inventory (5 units or less). Review catalog stock levels.
-                        </p>
-                      </div>
-                    </div>
-                  )}
+              {/* Tab 2: SALES & REVENUE ANALYTICS */}
+              {activeTab === 'sales_analytics' && (
+                <SalesAnalyticsTab
+                  summaryData={salesSummary}
+                  categoryData={categoryAnalytics}
+                  range={salesRange}
+                  setRange={setSalesRange}
+                  loading={analyticsLoading}
+                />
+              )}
 
-                  {/* Stat Cards Grid */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
-                    <div className="bg-white border border-gray-200 rounded-2xl p-6 shadow-sm flex flex-col justify-between">
-                      <div className="flex justify-between items-start">
-                        <div>
-                          <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">Total Revenue</span>
-                          <h2 className="text-2xl font-extrabold text-gray-900 mt-1.5">
-                            KSh {stats.totalSales.toLocaleString()}
-                          </h2>
-                        </div>
-                        <div className="p-2.5 bg-green-50 text-green-600 rounded-xl">
-                          <TrendingUp className="w-5 h-5" />
-                        </div>
-                      </div>
-                      <div className="text-[10px] text-green-600 font-semibold mt-4 flex items-center gap-1">
-                        <span>Paid & Delivered Orders</span>
-                      </div>
-                    </div>
+              {/* Tab 3: PREDICTIVE FORECAST & TARGETS */}
+              {activeTab === 'forecast' && (
+                <ForecastPlanningTab
+                  forecastData={forecastData}
+                  insightsData={insightsData}
+                  targetData={targetData}
+                  onRefresh={fetchAllAnalytics}
+                />
+              )}
 
-                    <div className="bg-white border border-gray-200 rounded-2xl p-6 shadow-sm flex flex-col justify-between">
-                      <div className="flex justify-between items-start">
-                        <div>
-                          <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">Total Orders</span>
-                          <h2 className="text-2xl font-extrabold text-gray-900 mt-1.5">
-                            {stats.totalOrders}
-                          </h2>
-                        </div>
-                        <div className="p-2.5 bg-blue-50 text-blue-600 rounded-xl">
-                          <Receipt className="w-5 h-5" />
-                        </div>
-                      </div>
-                      <div className="text-[10px] text-gray-500 font-semibold mt-4">
-                        All transaction attempts
-                      </div>
-                    </div>
+              {/* Tab 4: INVENTORY INTELLIGENCE */}
+              {activeTab === 'inventory_intel' && (
+                <InventoryIntelligenceTab
+                  inventoryData={inventoryHealth}
+                  loading={analyticsLoading}
+                />
+              )}
 
-                    <div className="bg-white border border-gray-200 rounded-2xl p-6 shadow-sm flex flex-col justify-between">
-                      <div className="flex justify-between items-start">
-                        <div>
-                          <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">Active Catalog</span>
-                          <h2 className="text-2xl font-extrabold text-gray-900 mt-1.5">
-                            {stats.totalProducts}
-                          </h2>
-                        </div>
-                        <div className="p-2.5 bg-purple-50 text-purple-600 rounded-xl">
-                          <ShoppingBag className="w-5 h-5" />
-                        </div>
-                      </div>
-                      <div className="text-[10px] text-amber-600 font-semibold mt-4">
-                        {stats.lowStockCount} running low
-                      </div>
-                    </div>
+              {/* Tab 5: M-PESA & PAYMENT HEALTH */}
+              {activeTab === 'payment_health' && (
+                <PaymentHealthTab
+                  paymentData={paymentData}
+                  range={paymentRange}
+                  setRange={setPaymentRange}
+                />
+              )}
 
-                    <div className="bg-white border border-gray-200 rounded-2xl p-6 shadow-sm flex flex-col justify-between">
-                      <div className="flex justify-between items-start">
-                        <div>
-                          <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">Unread Inquiries</span>
-                          <h2 className="text-2xl font-extrabold text-gray-900 mt-1.5">
-                            {stats.pendingMessagesCount}
-                          </h2>
-                        </div>
-                        <div className="p-2.5 bg-red-50 text-red-600 rounded-xl">
-                          <MessageSquare className="w-5 h-5" />
-                        </div>
-                      </div>
-                      <div className="text-[10px] text-red-500 font-semibold mt-4">
-                        Requires action
-                      </div>
-                    </div>
-                  </div>
+              {/* Tab 6: ORDER FULFILLMENT & LOGISTICS */}
+              {activeTab === 'fulfillment' && (
+                <FulfillmentTab
+                  fulfillmentData={fulfillmentData}
+                  range={fulfillmentRange}
+                  setRange={setFulfillmentRange}
+                />
+              )}
 
-                  {/* Dashboard Bottom Section */}
-                  <div className="grid lg:grid-cols-3 gap-6">
-                    {/* Recent Orders List */}
-                    <div className="bg-white border border-gray-200 rounded-2xl p-5 shadow-sm lg:col-span-2">
-                      <div className="flex items-center justify-between mb-4">
-                        <h3 className="font-bold text-gray-900 text-sm">Recent Orders</h3>
-                        <button onClick={() => setActiveTab('orders')} className="text-xs font-bold text-brand-600 hover:underline">
-                          View All
-                        </button>
-                      </div>
-
-                      <div className="divide-y divide-gray-100">
-                        {stats.recentOrders.length === 0 ? (
-                          <div className="py-8 text-center text-xs text-gray-400">No orders registered.</div>
-                        ) : (
-                          stats.recentOrders.map(order => (
-                            <div key={order.id} className="py-3 flex items-center justify-between text-xs">
-                              <div>
-                                <p className="font-bold text-gray-800">{order.order_ref}</p>
-                                <p className="text-gray-400 mt-0.5">{order.customer_name} • {new Date(order.created_at).toLocaleDateString()}</p>
-                              </div>
-                              <div className="flex items-center gap-3">
-                                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                                  order.status === 'delivered' ? 'bg-green-50 text-green-700' :
-                                  order.status === 'pending' ? 'bg-amber-50 text-amber-700' :
-                                  'bg-blue-50 text-blue-700'
-                                }`}>
-                                  {order.status}
-                                </span>
-                                <span className="font-semibold text-gray-700">KSh {order.total_amount.toLocaleString()}</span>
-                              </div>
-                            </div>
-                          ))
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Shop details & Quick Metrics */}
-                    <div className="bg-white border border-gray-200 rounded-2xl p-5 shadow-sm">
-                      <h3 className="font-bold text-gray-900 text-sm mb-4 font-serif">Quick Actions</h3>
-                      <div className="space-y-3">
-                        <button 
-                          onClick={() => handleOpenProductModal()}
-                          className="w-full h-11 bg-brand-600 hover:bg-brand-700 text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-colors"
-                        >
-                          <Plus className="w-4 h-4" />
-                          Add New Product
-                        </button>
-                        <button 
-                          onClick={() => handleOpenCategoryModal()}
-                          className="w-full h-11 border border-gray-200 hover:bg-gray-50 text-gray-700 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-colors"
-                        >
-                          <Plus className="w-4 h-4" />
-                          Create Category
-                        </button>
-                        
-                        <div className="h-px bg-gray-100 my-4"></div>
-
-                        <div className="space-y-2.5 text-xs">
-                          <div className="flex justify-between items-center text-gray-500">
-                            <span>M-Pesa Till:</span>
-                            <span className="font-bold text-gray-800">4149288 (Buy Goods)</span>
-                          </div>
-                          <div className="flex justify-between items-center text-gray-500">
-                            <span>Total Subscribers:</span>
-                            <span className="font-bold text-gray-800">{stats.totalSubscribers}</span>
-                          </div>
-                          <div className="flex justify-between items-center text-gray-500">
-                            <span>Products Featured:</span>
-                            <span className="font-bold text-gray-800">{products.filter(p => p.is_featured).length}</span>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
+              {/* Tab 7: ALERTS CENTRE */}
+              {activeTab === 'alerts' && (
+                <AlertsCentreTab
+                  alertsData={alertsData}
+                  onAcknowledge={(id) => setAlertsData(prev => prev.map(a => a.id === id ? { ...a, acknowledged: true } : a))}
+                  onRefresh={fetchAllAnalytics}
+                />
               )}
 
               {/* Tab 2: PRODUCTS */}
@@ -711,8 +906,8 @@ export default function AdminDashboard() {
                 <div className="space-y-6">
                   <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                     <div>
-                      <h1 className="font-serif text-2xl lg:text-3xl font-bold text-gray-900">Product Management</h1>
-                      <p className="text-sm text-gray-500 mt-1">Manage catalog inventory, pricing, and availability.</p>
+                      <h1 className="font-display text-2xl lg:text-3xl font-extrabold text-gray-950 tracking-tight">Product Catalogue</h1>
+                      <p className="text-xs text-gray-500 mt-1">Manage catalog inventory, pricing, and stock availability.</p>
                     </div>
                     <button
                       onClick={() => handleOpenProductModal()}
@@ -724,7 +919,7 @@ export default function AdminDashboard() {
                   </div>
 
                   {/* Search & Filter bar */}
-                  <div className="bg-white border border-gray-200 rounded-2xl p-4 shadow-sm flex flex-col md:flex-row gap-4 items-center justify-between">
+                  <div className="bg-white border border-gray-100 rounded-2xl p-4 sm:p-5 shadow-sm flex flex-col md:flex-row gap-4 items-center justify-between">
                     <div className="relative w-full md:w-80">
                       <Search className="absolute left-3.5 top-3 w-4 h-4 text-gray-400" />
                       <input
@@ -732,14 +927,14 @@ export default function AdminDashboard() {
                         placeholder="Search product name or slug..."
                         value={prodSearch}
                         onChange={(e) => setProdSearch(e.target.value)}
-                        className="w-full h-10 pl-10 pr-4 border border-gray-200 rounded-xl text-xs focus:border-brand-500 outline-none"
+                        className="w-full h-10 pl-10 pr-4 border border-gray-200/80 rounded-xl text-xs focus:border-brand-500 focus:ring-2 focus:ring-brand-50 outline-none"
                       />
                     </div>
                     <div className="w-full md:w-auto flex gap-3.5 self-stretch md:self-auto">
                       <select
                         value={prodCategoryFilter}
                         onChange={(e) => setProdCategoryFilter(e.target.value)}
-                        className="flex-1 md:w-48 h-10 border border-gray-200 rounded-xl px-3.5 text-xs focus:border-brand-500 outline-none bg-white font-semibold"
+                        className="flex-1 md:w-48 h-10 border border-gray-200/80 rounded-xl px-3.5 text-xs focus:border-brand-500 outline-none bg-white font-semibold"
                       >
                         <option value="">All Categories</option>
                         {categories.map(cat => (
@@ -750,11 +945,11 @@ export default function AdminDashboard() {
                   </div>
 
                   {/* Products Table */}
-                  <div className="bg-white border border-gray-200 rounded-2xl shadow-sm overflow-hidden">
+                  <div className="bg-white border border-gray-100 rounded-2xl shadow-sm overflow-hidden">
                     <div className="overflow-x-auto">
-                      <table className="w-full text-left border-collapse text-xs">
+                      <table className="w-full text-left border-collapse text-xs min-w-[640px]">
                         <thead>
-                          <tr className="bg-gray-50 border-b border-gray-200 text-gray-500 uppercase tracking-wider font-bold h-11">
+                          <tr className="bg-slate-50/80 border-b border-gray-100 text-slate-500 uppercase tracking-wider font-extrabold text-[10px] h-11">
                             <th className="px-6">Product details</th>
                             <th className="px-4">Category</th>
                             <th className="px-4">Price</th>
@@ -867,8 +1062,8 @@ export default function AdminDashboard() {
                 <div className="space-y-6">
                   <div className="flex justify-between items-center">
                     <div>
-                      <h1 className="font-serif text-2xl lg:text-3xl font-bold text-gray-900">Category Catalog</h1>
-                      <p className="text-sm text-gray-500 mt-1">Configure shop categories and icons.</p>
+                      <h1 className="font-display text-2xl lg:text-3xl font-extrabold text-gray-950 tracking-tight">Category Catalog</h1>
+                      <p className="text-xs text-gray-500 mt-1">Configure shop categories, icons, and product counts.</p>
                     </div>
                     <button
                       onClick={() => handleOpenCategoryModal()}
@@ -882,9 +1077,9 @@ export default function AdminDashboard() {
                   {/* Grid layout for categories */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
                     {categories.map(cat => (
-                      <div key={cat.id} className="bg-white border border-gray-200 rounded-2xl p-5 shadow-sm flex items-center justify-between">
+                      <div key={cat.id} className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm hover:shadow-md hover:border-brand-200 transition-all flex items-center justify-between">
                         <div className="flex items-center gap-4">
-                          <span className="text-3xl p-2 bg-gray-50 rounded-xl">{cat.icon || '📁'}</span>
+                          <span className="text-2xl p-3 bg-slate-50 border border-gray-100 rounded-xl">{cat.icon || '📁'}</span>
                           <div>
                             <h3 className="font-bold text-gray-900 text-base">{cat.name}</h3>
                             <p className="text-xs text-gray-400 mt-0.5">{cat.slug}</p>
@@ -918,12 +1113,12 @@ export default function AdminDashboard() {
               {activeTab === 'orders' && (
                 <div className="space-y-6">
                   <div>
-                    <h1 className="font-serif text-2xl lg:text-3xl font-bold text-gray-900">Order Management</h1>
-                    <p className="text-sm text-gray-500 mt-1">Review checkout order status, payments, and address logistics.</p>
+                    <h1 className="font-display text-2xl lg:text-3xl font-extrabold text-gray-950 tracking-tight">Order Management & Fulfillment</h1>
+                    <p className="text-xs text-gray-500 mt-1">Track customer checkouts, M-Pesa receipts, and delivery dispatch statuses.</p>
                   </div>
 
                   {/* Search and filter toolbar */}
-                  <div className="bg-white border border-gray-200 rounded-2xl p-4 shadow-sm flex flex-col md:flex-row gap-4 items-center justify-between">
+                  <div className="bg-white border border-gray-100 rounded-2xl p-4 sm:p-5 shadow-sm flex flex-col md:flex-row gap-4 items-center justify-between">
                     <div className="relative w-full md:w-80">
                       <Search className="absolute left-3.5 top-3 w-4 h-4 text-gray-400" />
                       <input
@@ -931,14 +1126,14 @@ export default function AdminDashboard() {
                         placeholder="Search ref or customer name..."
                         value={orderSearch}
                         onChange={(e) => setOrderSearch(e.target.value)}
-                        className="w-full h-10 pl-10 pr-4 border border-gray-200 rounded-xl text-xs focus:border-brand-500 outline-none"
+                        className="w-full h-10 pl-10 pr-4 border border-gray-200/80 rounded-xl text-xs focus:border-brand-500 focus:ring-2 focus:ring-brand-50 outline-none"
                       />
                     </div>
                     <div className="w-full md:w-auto flex flex-wrap md:flex-nowrap gap-3 self-stretch md:self-auto">
                       <select
                         value={orderStatusFilter}
                         onChange={(e) => setOrderStatusFilter(e.target.value)}
-                        className="flex-1 md:w-36 h-10 border border-gray-200 rounded-xl px-3 text-xs focus:border-brand-500 outline-none bg-white font-semibold"
+                        className="flex-1 md:w-36 h-10 border border-gray-200/80 rounded-xl px-3 text-xs focus:border-brand-500 outline-none bg-white font-semibold"
                       >
                         <option value="">All Orders</option>
                         <option value="pending">Pending</option>
@@ -951,7 +1146,7 @@ export default function AdminDashboard() {
                       <select
                         value={orderPaymentFilter}
                         onChange={(e) => setOrderPaymentFilter(e.target.value)}
-                        className="flex-1 md:w-40 h-10 border border-gray-200 rounded-xl px-3 text-xs focus:border-brand-500 outline-none bg-white font-semibold"
+                        className="flex-1 md:w-40 h-10 border border-gray-200/80 rounded-xl px-3 text-xs focus:border-brand-500 outline-none bg-white font-semibold"
                       >
                         <option value="">All Payments</option>
                         <option value="pending">Payment Pending</option>
@@ -962,11 +1157,11 @@ export default function AdminDashboard() {
                   </div>
 
                   {/* Orders Table */}
-                  <div className="bg-white border border-gray-200 rounded-2xl shadow-sm overflow-hidden">
+                  <div className="bg-white border border-gray-100 rounded-2xl shadow-sm overflow-hidden">
                     <div className="overflow-x-auto">
-                      <table className="w-full text-left border-collapse text-xs">
+                      <table className="w-full text-left border-collapse text-xs min-w-[700px]">
                         <thead>
-                          <tr className="bg-gray-50 border-b border-gray-200 text-gray-500 uppercase tracking-wider font-bold h-11">
+                          <tr className="bg-slate-50/80 border-b border-gray-100 text-slate-500 uppercase tracking-wider font-extrabold text-[10px] h-11">
                             <th className="px-6">Order Ref</th>
                             <th className="px-4">Customer</th>
                             <th className="px-4">Date</th>
@@ -1070,20 +1265,20 @@ export default function AdminDashboard() {
               {activeTab === 'reviews' && (
                 <div className="space-y-6">
                   <div>
-                    <h1 className="font-serif text-2xl lg:text-3xl font-bold text-gray-900">Reviews & Testimonials</h1>
-                    <p className="text-sm text-gray-500 mt-1">Moderate customer comments appearing on the store homepage.</p>
+                    <h1 className="font-display text-2xl lg:text-3xl font-extrabold text-gray-950 tracking-tight">Reviews & Testimonials</h1>
+                    <p className="text-xs text-gray-500 mt-1">Moderate customer ratings and verified purchase feedback.</p>
                   </div>
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                     {reviews.length === 0 ? (
-                      <div className="bg-white border border-gray-200 rounded-2xl p-8 text-center text-xs text-gray-400 md:col-span-2">
+                      <div className="bg-white border border-gray-100 rounded-2xl p-8 text-center text-xs text-gray-400 md:col-span-2">
                         No reviews in database.
                       </div>
                     ) : (
                       reviews.map(rev => {
                         const prod = products.find(p => p.id === rev.product_id);
                         return (
-                          <div key={rev.id} className="bg-white border border-gray-200 rounded-2xl p-5 shadow-sm flex flex-col justify-between space-y-4">
+                          <div key={rev.id} className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm flex flex-col justify-between space-y-4">
                             <div className="space-y-2">
                               <div className="flex justify-between items-start">
                                 <div>
@@ -1122,7 +1317,7 @@ export default function AdminDashboard() {
                                 {!rev.is_approved && (
                                   <button
                                     onClick={() => handleApproveReview(rev.id)}
-                                    className="h-8 px-3.5 bg-green-600 hover:bg-green-700 text-white rounded-lg text-[10px] font-bold flex items-center gap-1"
+                                    className="h-8 px-3.5 bg-green-600 hover:bg-green-700 text-white rounded-lg text-[10px] font-bold flex items-center gap-1 transition-colors"
                                   >
                                     <Check className="w-3.5 h-3.5" />
                                     Approve
@@ -1130,7 +1325,7 @@ export default function AdminDashboard() {
                                 )}
                                 <button
                                   onClick={() => handleRejectReview(rev.id)}
-                                  className="h-8 px-3.5 border border-red-200 hover:bg-red-50 text-red-600 rounded-lg text-[10px] font-bold flex items-center gap-1"
+                                  className="h-8 px-3.5 border border-red-200 hover:bg-red-50 text-red-600 rounded-lg text-[10px] font-bold flex items-center gap-1 transition-colors"
                                 >
                                   <Trash2 className="w-3.5 h-3.5" />
                                   Delete
@@ -1149,19 +1344,19 @@ export default function AdminDashboard() {
               {activeTab === 'messages' && (
                 <div className="space-y-6">
                   <div>
-                    <h1 className="font-serif text-2xl lg:text-3xl font-bold text-gray-900">Customer Inquiries</h1>
-                    <p className="text-sm text-gray-500 mt-1">Review contact inquiries left by store visitors.</p>
+                    <h1 className="font-display text-2xl lg:text-3xl font-extrabold text-gray-950 tracking-tight">Customer Inquiries</h1>
+                    <p className="text-xs text-gray-500 mt-1">Review contact inquiries left by store visitors.</p>
                   </div>
 
                   <div className="space-y-4">
                     {messages.length === 0 ? (
-                      <div className="bg-white border border-gray-200 rounded-2xl p-8 text-center text-xs text-gray-400">
+                      <div className="bg-white border border-gray-100 rounded-2xl p-8 text-center text-xs text-gray-400">
                         No customer messages found.
                       </div>
                     ) : (
                       messages.map(msg => (
                         <div key={msg.id} className={`bg-white border rounded-2xl p-5 shadow-sm space-y-3 ${
-                          !msg.is_read ? 'border-brand-500 ring-1 ring-brand-500' : 'border-gray-200'
+                          !msg.is_read ? 'border-brand-500 ring-1 ring-brand-500' : 'border-gray-100'
                         }`}>
                           <div className="flex flex-col sm:flex-row justify-between items-start gap-2">
                             <div>
@@ -1175,7 +1370,7 @@ export default function AdminDashboard() {
                             <div className="flex gap-2">
                               <button
                                 onClick={() => handleToggleMessageRead(msg)}
-                                className={`h-8 px-3.5 rounded-lg text-[10px] font-bold ${
+                                className={`h-8 px-3.5 rounded-lg text-[10px] font-bold transition-colors ${
                                   msg.is_read 
                                     ? 'border border-gray-200 hover:bg-gray-50 text-gray-600' 
                                     : 'bg-brand-600 hover:bg-brand-700 text-white'
@@ -1200,15 +1395,15 @@ export default function AdminDashboard() {
               {activeTab === 'subscribers' && (
                 <div className="space-y-6">
                   <div>
-                    <h1 className="font-serif text-2xl lg:text-3xl font-bold text-gray-900">Newsletter Subscribers</h1>
-                    <p className="text-sm text-gray-500 mt-1">E-Commerce newsletter subscribers for email marketing campaigns.</p>
+                    <h1 className="font-display text-2xl lg:text-3xl font-extrabold text-gray-950 tracking-tight">Newsletter Subscribers</h1>
+                    <p className="text-xs text-gray-500 mt-1">Naoja VIP subscribers for promotion announcements and updates.</p>
                   </div>
 
-                  <div className="bg-white border border-gray-200 rounded-2xl shadow-sm overflow-hidden">
+                  <div className="bg-white border border-gray-100 rounded-2xl shadow-sm overflow-hidden">
                     <div className="overflow-x-auto">
-                      <table className="w-full text-left border-collapse text-xs">
+                      <table className="w-full text-left border-collapse text-xs min-w-[580px]">
                         <thead>
-                          <tr className="bg-gray-50 border-b border-gray-200 text-gray-500 uppercase tracking-wider font-bold h-11">
+                          <tr className="bg-slate-50/80 border-b border-gray-100 text-slate-500 uppercase tracking-wider font-extrabold text-[10px] h-11">
                             <th className="px-6">Email Address</th>
                             <th className="px-4">Subscriber Name</th>
                             <th className="px-4">Date Joined</th>
@@ -1257,7 +1452,7 @@ export default function AdminDashboard() {
       {/* 1. ORDER DETAILS MODAL */}
       {/* ======================================================== */}
       {selectedOrder && (
-        <div className="fixed inset-0 z-50 overflow-y-auto bg-black/50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-50 overflow-y-auto naoja-modal-overlay flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl w-full max-w-2xl overflow-hidden shadow-xl max-h-[90vh] flex flex-col">
             
             {/* Header */}
@@ -1385,12 +1580,12 @@ export default function AdminDashboard() {
       {/* 2. ADD/EDIT PRODUCT MODAL */}
       {/* ======================================================== */}
       {isProductModalOpen && (
-        <div className="fixed inset-0 z-50 overflow-y-auto bg-black/50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-50 overflow-y-auto naoja-modal-overlay flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl w-full max-w-lg overflow-hidden shadow-xl max-h-[95vh] flex flex-col">
             
             <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between sticky top-0 bg-white">
-              <h3 className="font-serif text-lg font-bold text-gray-900">
-                {editingProduct ? 'Edit Product Details' : 'Add New Product to Catalog'}
+              <h3 className="font-display text-lg font-extrabold text-gray-950 tracking-tight">
+                {editingProduct ? 'Edit Product Details' : 'Add New Product to Catalogue'}
               </h3>
               <button 
                 onClick={() => setIsProductModalOpen(false)} 
@@ -1557,11 +1752,11 @@ export default function AdminDashboard() {
       {/* 3. ADD/EDIT CATEGORY MODAL */}
       {/* ======================================================== */}
       {isCategoryModalOpen && (
-        <div className="fixed inset-0 z-50 overflow-y-auto bg-black/50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-50 overflow-y-auto naoja-modal-overlay flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl w-full max-w-sm overflow-hidden shadow-xl flex flex-col">
             
             <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
-              <h3 className="font-serif text-lg font-bold text-gray-900">
+              <h3 className="font-display text-lg font-extrabold text-gray-950 tracking-tight">
                 {editingCategory ? 'Edit Category' : 'Add Category'}
               </h3>
               <button 
@@ -1623,7 +1818,7 @@ export default function AdminDashboard() {
 
       {/* Password Change Modal */}
       {isPasswordModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-50 naoja-modal-overlay flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl overflow-hidden">
             <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
               <h3 className="font-bold text-gray-900 text-base flex items-center gap-2">

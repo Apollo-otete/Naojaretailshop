@@ -21,7 +21,11 @@ const connectDatabases = async () => {
     if (!process.env.MONGODB_URI) {
       console.warn('⚠️ MONGODB_URI not set in .env');
     } else {
-      await mongoose.connect(process.env.MONGODB_URI);
+      mongoose.set('bufferCommands', false);
+      await mongoose.connect(process.env.MONGODB_URI, {
+        serverSelectionTimeoutMS: 2500,
+        connectTimeoutMS: 2500,
+      });
       console.log('✅ MongoDB Connected Successfully');
     }
 

@@ -7,7 +7,7 @@ export default function ProductCard({ product, showDiscount = true }) {
   const { addItem } = useCart();
   const [added, setAdded] = useState(false);
 
-  // Compute a realistic original price for visual discount (like Jumia & Kilimall)
+  // Compute a realistic original price for visual discount display
   const discountPercent = product.discount_percent || 20;
   const originalPrice = Math.round(product.price * (1 + discountPercent / 100));
 
@@ -46,11 +46,11 @@ export default function ProductCard({ product, showDiscount = true }) {
           </div>
         )}
 
-        {/* Express Delivery Badge */}
+        {/* Naoja Direct Dispatch Badge */}
         {!isOutOfStock && (
-          <div className="absolute bottom-2 left-2 bg-white/95 backdrop-blur-sm text-emerald-700 text-[9px] font-bold px-1.5 py-0.5 rounded shadow-sm border border-emerald-100 flex items-center gap-0.5">
-            <Zap className="w-2.5 h-2.5 fill-emerald-600 text-emerald-600" />
-            <span>Express</span>
+          <div className="absolute bottom-2 left-2 bg-white/95 backdrop-blur-sm text-brand-700 text-[9px] font-extrabold px-1.5 py-0.5 rounded shadow-sm border border-brand-100 flex items-center gap-0.5">
+            <Zap className="w-2.5 h-2.5 fill-brand-600 text-brand-600" />
+            <span>Naoja Direct</span>
           </div>
         )}
 
@@ -69,7 +69,7 @@ export default function ProductCard({ product, showDiscount = true }) {
         {/* Title */}
         <Link 
           to={`/product/${product.slug}`}
-          className="font-semibold text-gray-900 text-xs leading-snug line-clamp-2 hover:text-brand-600 transition-colors mb-1.5"
+          className="font-semibold text-gray-900 text-xs leading-snug line-clamp-2 h-8 hover:text-brand-600 transition-colors mb-1.5"
           title={product.name}
         >
           {product.name}
@@ -100,14 +100,14 @@ export default function ProductCard({ product, showDiscount = true }) {
           {isOutOfStock ? (
             <button
               disabled
-              className="w-full py-2 bg-gray-100 text-gray-400 text-[11px] font-bold rounded-lg cursor-not-allowed"
+              className="w-full min-h-[42px] py-2 bg-gray-100 text-gray-400 text-[11px] font-bold rounded-lg cursor-not-allowed touch-manipulation"
             >
               Sold Out
             </button>
           ) : (
             <button
               onClick={handleAddToCart}
-              className={`w-full py-2 px-2 rounded-lg text-[11px] font-bold transition-all duration-200 flex items-center justify-center gap-1 active:scale-95 cursor-pointer ${
+              className={`w-full min-h-[42px] py-2 px-2 rounded-lg text-[11px] font-bold transition-all duration-200 flex items-center justify-center gap-1.5 active:scale-95 cursor-pointer touch-manipulation shadow-xs ${
                 added
                   ? 'bg-emerald-600 text-white'
                   : 'bg-brand-500 hover:bg-brand-600 text-white'

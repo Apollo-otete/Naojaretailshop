@@ -3,12 +3,12 @@ import { MessageCircle, X } from 'lucide-react';
 
 export default function WhatsAppButton() {
   const [showTooltip, setShowTooltip] = useState(false);
-  const phoneNumber = import.meta.env.VITE_WHATSAPP_NUMBER || '254712345678';
+  const phoneNumber = import.meta.env.VITE_WHATSAPP_NUMBER || '2541122079767';
   const defaultMessage = encodeURIComponent('Hello Naoja Ventures! I have an inquiry about a product on your store.');
   const whatsappUrl = `https://wa.me/${phoneNumber}?text=${defaultMessage}`;
 
   return (
-    <div className="fixed bottom-6 right-6 z-40 flex items-center group">
+    <div className="fixed bottom-[calc(4.75rem+env(safe-area-inset-bottom))] md:bottom-[calc(1.5rem+env(safe-area-inset-bottom))] right-4 md:right-6 z-40 flex items-center group">
       {/* Tooltip Popup on Hover */}
       <div 
         className="hidden md:flex items-center gap-2 mr-3 px-3 py-2 bg-gray-900 text-white text-xs font-semibold rounded-xl shadow-xl transition-all duration-300 transform opacity-0 group-hover:opacity-100 pointer-events-none translate-x-2 group-hover:translate-x-0"

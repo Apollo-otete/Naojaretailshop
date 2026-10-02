@@ -4,7 +4,7 @@ const { pgPool } = require('../config/db');
 
 const resetAdmin = async () => {
   const newPassword = process.argv[2];
-  const adminEmail = process.argv[3] || 'admin@naojaventures.com';
+  const adminEmail = process.argv[3] || process.env.ADMIN_EMAIL || 'naojaventures@gmail.com';
 
   if (!newPassword) {
     console.error('❌ Error: Please provide the new password.');
