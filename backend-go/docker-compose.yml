@@ -1,0 +1,35 @@
+# Local development database for the Go service only.
+#
+# Host port 5433 rather than 5432: the legacy Express service keeps a PostgreSQL on the default
+# port on most development machines, and a reform that cannot run alongside the thing it
+# replaces forces a choice between the two. They stay separate databases on purpose — nothing is
+# migrated in place until Phase 4 proves the catalogue reads are equivalent.
+#
+# The credentials below are local-only and safe to commit because they are not used anywhere else.
+# Production configuration is out of scope for this file (§10).
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: naoja-go-postgres
+    environment:
+      POSTGRES_USER: naoja
+      POSTGRES_PASSWORD: naoja_dev_only
+      POSTGRES_DB: naoja
+    ports:
+      - "5433:5432"
+    volumes:
+      - naoja-go-pgdata:/var/lib/postgresql/data
+      # Creates naoja_test on first boot: the migration suite drops all nine schemas and must
+      # never share a database with the running API.
+      - ./docker/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      # pg_isready alone reports "accepting connections", which during crash recovery also
+      # includes a database that refuses every query. A real SELECT is the honest check.
+      test: ["CMD-SHELL", "pg_isready -U naoja -d naoja && psql -U naoja -d naoja -tc 'SELECT 1' | grep -q 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+volumes:
+  naoja-go-pgdata:

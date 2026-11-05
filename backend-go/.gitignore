@@ -1,0 +1,19 @@
+# Go build artefacts live here and never in Git.
+bin/
+dist/
+*.test
+*.out
+coverage.*
+
+# Secrets. The repository root already ignores `.env` at any depth; restating it here is
+# deliberate — §16 calls out config leakage specifically, and a rule that only exists in a
+# distant parent file is a rule that gets broken.
+.env
+.env.*
+!.env.example
+
+# Local overrides and editor/tool state.
+*.local
+.DS_Store
+.idea/
+.vscode/

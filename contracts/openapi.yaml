@@ -1634,7 +1634,8 @@ components:
           pattern: '^[A-Z][A-Z0-9_]*$'
           description: |
             Stable contract-level identifier. Known values across this increment:
-            `VALIDATION_FAILED`, `PERMISSION_DENIED`, `NOT_FOUND`, `STOCK_INSUFFICIENT`,
+            `VALIDATION_FAILED`, `PERMISSION_DENIED`, `NOT_AUTHENTICATED`, `NOT_FOUND`,
+            `METHOD_NOT_ALLOWED`, `STOCK_INSUFFICIENT`,
             `QUOTE_STALE`, `TRANSITION_NOT_ALLOWED`, `OVERRIDE_REASON_REQUIRED`,
             `METHOD_CONFLICT`, `IDEMPOTENCY_KEY_CONFLICT`, `PRICE_CHANGE_NOT_ALLOWED`,
             `PRODUCT_HAS_ORDER_HISTORY`, `PAYMENT_ALREADY_SETTLED`, `RATE_LIMITED`,
