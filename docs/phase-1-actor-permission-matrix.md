@@ -93,9 +93,9 @@ governance**; routine Admin 2 management is Admin 1's responsibility. §4 grants
 | `catalogue.categories.delete` | Delete a category | — | — | — | ✓ | ✓ |
 | `catalogue.product_images.manage` | Upload and attach images | — | — | ✓ | — | ✓ |
 
-`‡` Price change is the one catalogue action with a deliberate dual grant. §10 requires
-"product/price changes" to be audited; whether Admin 2 may set prices at all is an
-**open item** (§7.2 below).
+`‡` Resolved by **ADR-016**: Admin 2 may set prices, but every change requires a reason, is
+audited with previous and new value, and applies prospectively only — order lines carry a
+price snapshot that a later edit can never alter.
 
 ### 3.3 Shopping, Ordering and Inventory
 
@@ -124,14 +124,16 @@ governance**; routine Admin 2 management is Admin 1's responsibility. §4 grants
 | `payments.reconcile` | Reconcile a payment against Daraja records | — | — | ✓ | ✓ | ✓ |
 | `payments.status.override` | Manually set an order's payment status | — | — | — | ✓ | ✓ |
 | `payments.records.read.all` | Read all payment transactions | — | — | ✓* | ✓ | ✓ |
-| `payments.refund` | Issue a refund | — | — | — | **blocked** | **blocked** |
+| `payments.refund.request` | Open a refund request with reason and amount | — | — | ✓ | ✓ | ✓ |
+| `payments.refund` | Approve a request and record its execution | — | — | — | ✓ | ✓ |
 | `payments.callback.receive` | Daraja callback — **system credential, never a user role** | — | — | — | — | — |
 
 `payments.status.override` is deliberately **not** an Admin 2 permission. The current
 implementation lets any admin session flip `payment_status` from a dropdown with no reason
 recorded; §15 requires Admin 2 to be unable to manage privileged state by default.
-`payments.refund` is **blocked pending §18** — refunds are listed as an open item, so no
-role may hold it until the business defines the rule.
+`payments.refund` is resolved by **ADR-020**: refunds are in launch scope, executed
+manually outside the application, and recorded authoritatively. Splitting request from
+approval is what lets an Admin 2 raise a refund without being able to authorise one.
 No actor may hold `payments.callback.receive`; it is authenticated by Daraja callback
 verification, not by a role.
 
@@ -203,6 +205,9 @@ journeys"; §10 testing expectations: privilege escalation, IDOR/resource scope)
 | B12 | Removing a permission from a role removes it from every member without requiring re-login. |
 | B13 | Hiding a frontend control does **not** substitute for a backend denial; every B-assertion is tested at the API, not the UI. |
 | B14 | An invitation accepted by a wrong recipient cannot yield elevated permissions — activation requires the invited identifier to match. |
+| B15 | Admin 2 may **request** a refund but may never approve or record its execution (ADR-020). |
+| B16 | No order transition outside the ADR-015 table is reachable by any role without `ordering.orders.status.override`, and every use of it records a reason. |
+| B17 | A price edit by Admin 2 does not change the total of any order placed before it (ADR-016). |
 
 ---
 
@@ -246,9 +251,11 @@ full to the important actions in §6 below.
   releases stock.
 - **C5 — View my order history and tracking.** *AC:* only own orders; fulfilment updates
   visible; no access to another customer's record.
-- **C6 — Review something I actually bought.** *AC:* eligibility rule enforced by the backend
-  (exact rule **blocked on §18**); one review per eligible purchase per policy; a review
-  does not appear publicly until approved.
+- **C6 — Review something I actually bought.** *AC:* per **ADR-017** — authenticated
+  customer, a delivered order containing that product, within 90 days of delivery, one
+  review per product per customer; eligibility computed server-side from order records; a
+  review does not appear publicly until approved; the unauthenticated review endpoint is
+  removed.
 - **C7 — Control my details and notifications.** *AC:* profile, contact and notification
   preferences editable; data retention and deletion requests possible (§18 open item).
 
@@ -423,19 +430,25 @@ Phase 1 review.
 
 ---
 
-## 7. Open items that block approval
+## 7. Resolution of the §18 items that blocked this matrix
 
-§18 lists decisions still unresolved. These matrix cells cannot be finalised until they are
-answered, so this document is **draft until §7.1–§7.5 are closed**.
+Resolved in `docs/adr/ADR-015-020-open-item-resolutions.md`. Recorded as **Proposed**,
+pending product-owner ratification where marked.
 
-| # | Blocking question | §18 item | Matrix cells affected |
+| # | Question | Resolution | Still needs |
 |---|---|---|---|
-| 7.1 | Which order statuses exist and which transitions are permitted, including cancellation, failed payment, and refund? | order statuses | A-001, A-004, A-006, `ordering.orders.process` scope |
-| 7.2 | May Admin 2 set or change prices, or is pricing a business decision? | promotions/discounts | `catalogue.products.update_price` |
-| 7.3 | What makes a customer review-eligible — delivered order, paid order, time window, one per product? | customer review eligibility | `engagement.reviews.create` |
-| 7.4 | Delivery areas, fees, pickup windows, and who may assign or change deliveries | delivery model | `fulfilment.config.manage`, `fulfilment.assign` |
-| 7.5 | Authentication mechanism — cookie sessions vs access/refresh tokens — determines how B11/B12 (revoke-on-next-request) are satisfied | authentication strategy | all `[own]` scoping, session assertions |
-| 7.6 | Are refunds in scope for launch? | refunds | `payments.refund` currently blocked for every role |
+| 7.1 | Order statuses and permitted transitions | **ADR-015** — 10-state order machine + independent payment machine, explicit transition table, `shipped` retired for `dispatched`, pickup/delivery paths separated | — |
+| 7.2 | May Admin 2 set prices? | **ADR-016** — yes, with mandatory reason, audit, prospective-only effect | **RATIFY** |
+| 7.3 | Review eligibility rule | **ADR-017** — authenticated customer, delivered order containing the product, within 90 days, one per product, still moderated | blocked on Phase 3 identity; disable public endpoint until then |
+| 7.4 | Delivery areas, fees, windows, authority | **ADR-018** — zone model, fee/threshold moved into `system_settings`, server-side hours in `Africa/Nairobi`, Admin 1 configures / Admin 2 executes | **RATIFY** zone coverage and amounts |
+| 7.5 | Authentication mechanism | **ADR-019** — server-side sessions, HttpOnly cookie, Argon2id, immediate revocation, no tokens in query strings | verify cookie behaviour against the real deployment |
+| 7.6 | Refunds in launch scope? | **ADR-020** — yes; requested by Admin 2, approved by Admin 1/Super, executed manually, recorded; no auto-restock | **RATIFY** (cash movement) |
+
+Still unresolved from §18 and not answerable by engineering: **product variants** (deferred
+by ADR-020's companion note; `sku` uniqueness is added now), **promotions/discount
+precedence**, **tax/invoice requirements**, **email/SMS/WhatsApp provider choice and
+budget**, **data retention and Kenyan privacy obligations**, and **production hosting,
+domain, TLS and backup arrangements**.
 
 ---
 
