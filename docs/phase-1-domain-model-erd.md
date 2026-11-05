@@ -2,10 +2,11 @@
 
 **Implements:** §19 step 3, §12 step 4, §7 (bounded contexts), §9 (data strategy and
 modelling rules), §10 (security), §11 (API standards).
-**Depends on:** `docs/adr/ADR-015-020-open-item-resolutions.md`,
+**Depends on:** `docs/adr/ADR-015-023-open-item-resolutions.md`,
 `docs/phase-1-actor-permission-matrix.md`.
-**Status:** Draft for review. §13 Phase 1 exit criterion is "domain language, schema draft
-and API contract reviewed."
+**Status:** Draft for review. §13's Phase 1 exit criterion is "domain language, schema draft
+and API contract reviewed" — all three now exist (`contracts/openapi.yaml` is step 4), and the
+decisions that gated them were ratified on 2026-11-05 except ADR-018's delivery terms.
 
 ---
 
@@ -48,7 +49,7 @@ decision is made once, is recorded, and never has to be reproduced from floating
 arithmetic later.
 
 If the business ever needs sub-shilling pricing, this constraint is the thing to revisit.
-This rule should be lifted into the ADR register as **ADR-021** once reviewed.
+Recorded as **ADR-021** (Accepted).
 
 ---
 
@@ -461,14 +462,16 @@ Retains the five live tables from `initPg.js` with renamed, typed equivalents, p
 `analytics.thresholds`, `analytics.alerts`, `analytics.forecast_runs`,
 `analytics.product_sales_velocity`.
 
-**Revenue definition — unresolved by this document.** The current rule
-`payment_status='paid' OR status='delivered'` books unpaid delivered orders as revenue
-(inventory §5.5) and, per ADR-020, must additionally subtract executed refunds. The
-suggested definition is: *revenue = sum of `payments.amount_paid_cents` where
-`payments.status='paid'`, minus sum of `refunds.amount_cents` where
-`refunds.status='executed'`, attributed to the period of settlement, not of order
-creation.* This is a business term, not a modelling choice, and is flagged for the product
-owner before Phase 7.
+**Revenue definition — resolved as ADR-022 (Accepted, 2026-11-05).** Revenue is
+*Σ `payments.amount_paid_cents` where `payments.status='paid'`, minus Σ `refunds.amount_cents`
+where `refunds.status='executed'`, attributed to the period of settlement or execution — not
+the period of order creation.* The current rule `payment_status='paid' OR status='delivered'`
+books unpaid delivered orders as revenue (inventory §5.5) and is discarded, not ported.
+
+Consequence for this schema: `analytics.daily_snapshots` and `analytics.sales_summaries` key on
+`payments.settled_at` and `refunds.executed_at`, and **cannot** be derived from
+`orders.created_at`. A dashboard card grouped by order date is an order count, not revenue, and
+must be labelled that way.
 
 ### 5.9 `administration`
 
@@ -663,12 +666,12 @@ list.
   tables are drafted.
 - **Product variants.** Deferred by the ADR register note. `sku` is unique per product now;
   a variant model would move uniqueness to the variant and change the inventory key.
-- **Revenue definition.** Business term, flagged in §5.8.
+- **Revenue definition.** Resolved — **ADR-022**, settlement minus executed refunds. See §5.8.
 - **Data retention, consent, deletion.** §18 item, legal/commercial input required;
   `subscribers.consent_source`/`consented_at` are placeholders for whatever is decided.
-- **Multi-location stock.** §18 asks whether stock is tracked per location. This schema
-  assumes **one** location; `inventory.product_id UNIQUE` is the constraint that would have
-  to change. Confirm before Phase 4.
+- **Multi-location stock.** Resolved — **ADR-023**, one location, so
+  `inventory.product_id UNIQUE` is a decision rather than a default. The cost of widening that
+  key is recorded there so a later change is priced, not discovered.
 - **Migration tooling.** §6 names golang-migrate. Every DDL block above is written to be
   expressible as an up/down pair; the append-only permission revocations and the generated
   column need care in down migrations.
@@ -677,9 +680,15 @@ list.
 
 ## 10. Review focus for Phase 1 exit
 
-1. Is the ADR-015 transition table right for how the shop actually operates?
+1. Is the ADR-015 transition table right for how the shop actually operates? *(Accepted —
+   review it against a real week of orders before Phase 5.)*
 2. Is T-03's four-step idempotency acceptable, or does the business want a reconciliation
-   queue for amount-mismatch cases rather than a refused transition?
-3. Confirm single-location stock (§9) before Phase 4 builds on it.
-4. Ratify the three ADRs marked **RATIFY** — pricing authority, delivery terms, refunds.
+   queue for amount-mismatch cases rather than a refused transition? *(Open — this is the one
+   remaining question about money behaviour, and ADR-022's `reconciliation_required` flag
+   exists either way.)*
+3. Confirm single-location stock before Phase 4. **Done — ADR-023, one location.**
+4. Ratify the ADRs marked **RATIFY**. **Partly done** — ADR-016 and ADR-020 ratified
+   2026-11-05. **ADR-018 still needs the zone list, the delivery fee and the free-delivery
+   threshold**, and blocks Phase 5 only.
 5. Agree the revenue definition so Phase 7 analytics has something to implement.
+   **Done — ADR-022, settlement minus executed refunds.**

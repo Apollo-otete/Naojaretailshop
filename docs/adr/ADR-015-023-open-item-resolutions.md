@@ -1,19 +1,30 @@
-# ADR-015 → ADR-020 — Resolution of §18 Open Items
+# ADR-015 → ADR-023 — Resolution of §18 Open Items
 
-Resolves the six questions that block the domain model and ERD (§19 step 3). Written to the
-Appendix B template.
+Resolves the six questions that block the domain model and ERD (§19 step 3), plus three
+consequential decisions that fell out of ratification. Written to the Appendix B template.
 
-**Status convention:** all six are **Proposed**, not Accepted. §18 requires these to be
-resolved before implementation, and several are cash or customer-facing business rules that
-the product owner must ratify. They are decided in enough detail to build a schema against,
-and each names what would reopen it. Anything marked **RATIFY** must be confirmed with
-Naoja Ventures before Phase 5 ships.
+## Ratification record — 2026-11-05
+
+The product owner reviewed the items that carried a **RATIFY** flag and answered them:
+
+| ADR | Question put | Answer | Effect |
+|---|---|---|---|
+| 016 | May Admin 2 set product prices? | **Ratified as written** | Admin 2 holds `catalogue.products.update_price`; reason, audit and prospective-only stand. No request/approval queue. |
+| 020 | Are refunds in launch scope, disbursed manually? | **Ratified as written** | `payments.refund.request` / `payments.refund` split holds; no auto-restock; no B2C at launch. |
+| 022 | What do analytics call revenue? | **Settlement minus executed refunds** | Replaces `payment_status='paid' OR status='delivered'`. Recorded as ADR-022. |
+| 023 | One stock location or several? | **One location** | `inventory.product_id UNIQUE` is a commitment, not a default. Recorded as ADR-023. |
+
+**ADR-015, 016, 017, 019, 020, 021, 022 and 023 are Accepted.** **ADR-018 remains Proposed**
+because its zone coverage and fee amounts are commercial terms only Naoja Ventures can supply
+— the three inputs needed are listed in its **Status** block. Nothing in Phase 2 or Phase 3
+depends on ADR-018; Phase 5 does.
+
 
 ---
 
 # ADR-015: Order lifecycle and permitted transitions
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-11-05
 
 ## Context
@@ -135,7 +146,9 @@ introduces multi-shipment split orders.
 
 # ADR-016: Price authority for Admin 2
 
-- **Status:** Proposed — **RATIFY**
+- **Status:** Accepted — **ratified by the product owner, 2026-11-05**, when asked whether
+  pricing should stay above Admin 2; the answer was to keep it as written. No request/approval
+  queue for price changes.
 
 ## Context
 
@@ -185,7 +198,9 @@ the business reports unexplained price drift, or asks for promotions to override
 
 # ADR-017: Review eligibility
 
-- **Status:** Proposed
+- **Status:** Accepted — the rule is decided; implementation still cannot land before
+  Phase 3 identity, because eligibility is proven against delivered orders that do not exist
+  until customers do.
 
 ## Context
 
@@ -246,7 +261,12 @@ different rules.
 
 # ADR-018: Fulfilment model — zones, fees, pickup windows, and who may change them
 
-- **Status:** Proposed — **RATIFY** (fee amounts and zone coverage are commercial terms)
+- **Status:** Proposed — **the only decision still open.** The *shape* (zones, settings-backed
+  fees, server-side store hours, Admin 1 configures / Admin 2 executes) is accepted and safe
+  to build against. The *values* are commercial terms and are needed as input:
+  1. Which areas does the shop actually deliver to, and are they grouped into named zones?
+  2. Standard delivery fee, and the order value at or above which delivery becomes free.
+  3. Same-day order cutoff time, and the days/hours that apply to pickup and to delivery.
 
 ## Context
 
@@ -322,7 +342,8 @@ the shop starts using riders with per-drop pricing, or expands beyond the county
 
 # ADR-019: Authentication and session model
 
-- **Status:** Proposed
+- **Status:** Accepted — the remaining action is verification, not decision: confirm the
+  cookie behaves correctly against the real deployment origin and TLS once hosting is chosen.
 
 ## Context
 
@@ -397,7 +418,9 @@ cross-origin cookies — in which case the refresh-token alternative becomes the
 
 # ADR-020: Refunds in launch scope, executed manually, recorded authoritatively
 
-- **Status:** Proposed — **RATIFY** (this is real money)
+- **Status:** Accepted — **ratified by the product owner, 2026-11-05**, on the question of
+  whether refunds are in launch scope with manual disbursement. Partial (per-line) refunds
+  stand as written; they are not narrowed to full-order refunds.
 
 ## Context
 
@@ -462,6 +485,195 @@ authoritative record.**
 
 refund volume makes manual execution the bottleneck, at which point Daraja B2C becomes the
 next payment integration.
+
+---
+
+# ADR-021: Money representation — integer cents, whole-shilling prices, round once
+
+- **Status:** Accepted
+- **Date:** 2026-11-05
+- **Lifted from:** `docs/phase-1-domain-model-erd.md` §2, where it was recorded as a candidate
+  for this register.
+
+## Context
+
+§9's data rules forbid floating-point money. Two constraints collide here: Daraja STK Push
+requires a **whole-number shilling** amount, while product prices and percentage discounts
+naturally produce fractional shillings. The current code resolves the collision by rounding at
+the moment of payment (`Math.ceil(amount)` in `mpesa.js:65`) on a total the client supplied —
+so the rounding is invisible, unrepeated and unrecorded, and the amount charged can differ
+from the amount the order says is owed.
+
+## Decision
+
+1. Every monetary value is a `BIGINT` count of **cents**. No float, no numeric-in-a-string, no
+   "KES 1,200" as a value.
+2. **Product prices are whole shillings**, enforced in the database:
+   `CHECK (price_cents % 100 = 0)`.
+3. A percentage discount is computed in cents and **rounded half-up to the nearest whole
+   shilling exactly once, at quote creation**, then snapshotted onto the order line. Nothing
+   downstream re-derives it.
+4. `totals_reconcile` (`total = subtotal + delivery_fee − discount`) and
+   `line_total_is_exact` (`line_total = unit_price × quantity`) are database CHECKs, so a
+   response whose arithmetic does not close cannot be persisted, let alone returned.
+
+Consequence of 2 + 3: `amount_cents / 100` sent to Daraja is **identical** to the order total,
+not approximately equal to it. That is what lets `paid_requires_exact_amount` exist at all —
+an exact-match settlement rule is only fair when the system never generated a fraction.
+
+## Alternatives considered
+
+- **Allow sub-shilling prices and round at payment time.** Rejected: it reintroduces the
+  current defect, and forces the reconciliation job to treat "off by a few cents" as a
+  routine state rather than a bug.
+- **Store money as `NUMERIC(12,2)`.** Rejected against §9's wording, and it invites the
+  arithmetic to leak into whatever language reads it.
+- **Round discounts per line instead of per order.** Rejected: per-line rounding makes the
+  order total the sum of independently rounded parts, which drifts from the whole-order
+  figure the customer was quoted.
+
+## Consequences
+
+- The shop cannot list a KSh 99.99 price. If sub-shilling pricing is ever genuinely required,
+  this ADR is the one to reopen, and `paid_requires_exact_amount` must be relaxed in the same
+  change — not left to disagree with it.
+- Daraja integration gets simpler: no `ceil`, no amount tolerance, no "close enough" branch.
+- Every API field carrying money is an `int64` named `*_cents`, and currency appears only on
+  `system_settings` and `payment_transactions` (§9 selective-JSONB discipline aside, a
+  single-currency shop does not repeat it per row).
+
+## Verification
+
+- Unit: a 12.5%-off KSh 1,499 line produces one recorded rounded figure, and re-quoting it
+  returns the same figure.
+- Property test: for any set of lines, `sum(line_total_cents) == subtotal_cents` and the
+  quoted `total_cents` equals the amount handed to Daraja.
+- Database: an attempt to insert a price with non-zero cents is refused; an order whose totals
+  do not close is refused.
+
+## Reopens if
+
+the business adopts sub-shilling pricing (unit economics, fuel-indexed goods) or adds a second
+currency.
+
+---
+
+# ADR-022: Revenue recognition — settlement minus executed refunds
+
+- **Status:** Accepted — **decided by the product owner, 2026-11-05**, when asked which
+  definition the analytics should implement.
+- **Date:** 2026-11-05
+
+## Context
+
+The current rule counts an order as revenue when `payment_status='paid' OR status='delivered'`
+(`index.js:530,557`). The `OR` books goods that were delivered but never paid for, and the two
+branches measure different things, so the same day can be reported as revenue twice depending
+on which filter an endpoint applies. ADR-020 additionally puts refunds in launch scope, and a
+definition that ignores them overstates the till.
+
+## Decision
+
+**Revenue = Σ `payments.amount_paid_cents` where `payments.status = 'paid'`, minus Σ
+`refunds.amount_cents` where `refunds.status = 'executed'`, each attributed to the period in
+which that settlement or that execution occurred — not the period the order was created.**
+
+Two corollaries that make the definition implementable rather than aspirational:
+
+- A `pending` order is **not** revenue, however far along its fulfilment has got. Order count
+  and revenue are separate metrics and must never be conflated in one card.
+- A refund subtracts in the period it was **executed**, not the period of the original sale.
+  Restating a closed historical period is not something a shop owner can verify against their
+  own till statement; the current period absorbs the reversal.
+- Manual overrides and reconciled settlements are tagged at source (`reconciliation_runs`), so
+  "callback-confirmed revenue" and "revenue established by hand" can be reported apart. The
+  headline figure is the same; the audit view shows its composition.
+
+## Alternatives considered
+
+- **Recognise at delivery.** Rejected — it decouples the revenue figure from the money in the
+  till, which is the comparison the owner actually makes.
+- **Keep the existing dual rule for continuity with numbers already shown.** Rejected: it is
+  the defect the Phase 0 inventory flagged, and pre-launch means no published history has to
+  be reconciled with it.
+- **Match refunds back to the original sale period.** Rejected for the till-statement reason
+  above; revisit only if accounting advice says otherwise.
+
+## Consequences
+
+- `daily_snapshots` and `sales_summaries` key on `payments.settled_at` and
+  `refunds.executed_at`, so they cannot be derived from `orders.created_at` at all. Any
+  dashboard that groups by order date must be labelled "orders by date", not revenue.
+- Every figure the current analytics panel computed is wrong under this definition and is not
+  migrated — the Phase 7 work is a rebuild, not a port.
+- `refunded` orders that were never `paid` (cancelled before settlement) produce no revenue and
+  no refund line, which is correct and will look like a gap to anyone expecting symmetry.
+
+## Verification
+
+- Test: a delivered-but-unpaid order contributes 0 revenue and 1 order.
+- Test: a refund executed in period B reduces period B, leaves period A untouched.
+- Test: `revenue(orders) − revenue(refunds)` equals the till statement total for a period,
+  given the provider record as ground truth.
+- Test: an override-settled payment appears in the audit view distinctly from callback revenue.
+
+## Reopens if
+
+the business needs accrual-basis reporting, an auditor requires refunds matched to their
+original period, or a second currency makes a single `amount_paid_cents` column ambiguous.
+
+---
+
+# ADR-023: One stock location
+
+- **Status:** Accepted — **decided by the product owner, 2026-11-05.**
+- **Date:** 2026-11-05
+
+## Context
+
+§18 asked whether stock is tracked per location. The target schema states
+`inventory(product_id UNIQUE, on_hand, reserved)`, which asserts a single location: one row
+per product, one availability number, and a conditional update that reserves against it. That
+assertion is load-bearing for T-01, the reservation path that prevents overselling, and it was
+recorded as "confirm before Phase 4".
+
+## Decision
+
+**One stock location.** `inventory.product_id UNIQUE` stays. Availability shown on the
+storefront is `on_hand − reserved` for that one location, and the low/critical thresholds in
+`system_settings` apply to it.
+
+## Alternatives considered
+
+- **Multiple locations now.** Rejected on cost, not on principle: the key becomes
+  `(product_id, location_id)`, `stock_movements` and `stock_reservations` gain a location, the
+  reservation update must choose a location (introducing allocation rules), transfers become
+  first-class movements, and fulfilment must resolve which location serves which order. That is
+  a second inventory system, and the operation is one shop with one till and one pickup point.
+- **One location today, no record of the change cost.** Rejected — an unrecorded assumption is
+  how Phase 4 turns into a rewrite.
+
+## Consequences
+
+- Pickup and delivery both draw on the same availability pool. If delivery ever ships from
+  different premises, this ADR is wrong and the schema changes underneath it.
+- Multi-location stock is **not** expressible without a migration that changes a unique key on
+  the hottest table in the system. Doing it later is possible and priced: new
+  `fulfilment.locations`, key widening on three tables, and a backfill assigning every existing
+  row to the original location.
+- `orders` therefore needs no location column, and the ERD's `available GENERATED ALWAYS AS
+  (on_hand - reserved) STORED` stays a plain per-product generated column.
+
+## Verification
+
+- Test: concurrent reservations across two carts against one product cannot take `available`
+  below zero (this is T-01's real assertion and holds precisely because there is one row).
+- Test: a stock adjustment writes exactly one movement with the correct `on_hand_after`.
+
+## Reopens if
+
+a second physical premises, a consignment partner, or per-branch reporting is introduced — or
+if delivery is ever fulfilled from somewhere other than the shop floor.
 
 ---
 

@@ -4,8 +4,9 @@
 boundaries, permission design), §4 (functional scope, action catalogue, action
 specification standard), §7 (bounded contexts), §10 (security), §15 (definition of done),
 §17 (ADR-013).
-**Status:** Draft for approval — §19 step 2 requires this to be **approved** before Phase 3
-implementation begins.
+**Status:** Approved by the product owner, 2026-11-05 (§9) — §19 step 2 is closed for business
+purposes. Technical sign-off as Super Admin is still outstanding, and **ADR-018's delivery
+terms remain explicitly deferred** with the inputs they need.
 **Governing rule:** ADR-013 — granular backend RBAC; frontend guards are UX only.
 
 ---
@@ -432,20 +433,26 @@ Phase 1 review.
 
 ## 7. Resolution of the §18 items that blocked this matrix
 
-Resolved in `docs/adr/ADR-015-020-open-item-resolutions.md`. Recorded as **Proposed**,
-pending product-owner ratification where marked.
+Resolved in `docs/adr/ADR-015-023-open-item-resolutions.md`. Ratified by the product owner on
+2026-11-05 where marked.
 
-| # | Question | Resolution | Still needs |
+| # | Question | Resolution | Status |
 |---|---|---|---|
-| 7.1 | Order statuses and permitted transitions | **ADR-015** — 10-state order machine + independent payment machine, explicit transition table, `shipped` retired for `dispatched`, pickup/delivery paths separated | — |
-| 7.2 | May Admin 2 set prices? | **ADR-016** — yes, with mandatory reason, audit, prospective-only effect | **RATIFY** |
-| 7.3 | Review eligibility rule | **ADR-017** — authenticated customer, delivered order containing the product, within 90 days, one per product, still moderated | blocked on Phase 3 identity; disable public endpoint until then |
-| 7.4 | Delivery areas, fees, windows, authority | **ADR-018** — zone model, fee/threshold moved into `system_settings`, server-side hours in `Africa/Nairobi`, Admin 1 configures / Admin 2 executes | **RATIFY** zone coverage and amounts |
-| 7.5 | Authentication mechanism | **ADR-019** — server-side sessions, HttpOnly cookie, Argon2id, immediate revocation, no tokens in query strings | verify cookie behaviour against the real deployment |
-| 7.6 | Refunds in launch scope? | **ADR-020** — yes; requested by Admin 2, approved by Admin 1/Super, executed manually, recorded; no auto-restock | **RATIFY** (cash movement) |
+| 7.1 | Order statuses and permitted transitions | **ADR-015** — 10-state order machine + independent payment machine, explicit transition table, `shipped` retired for `dispatched`, pickup/delivery paths separated | **Accepted** |
+| 7.2 | May Admin 2 set prices? | **ADR-016** — yes, with mandatory reason, audit, prospective-only effect | **Accepted — ratified 2026-11-05** |
+| 7.3 | Review eligibility rule | **ADR-017** — authenticated customer, delivered order containing the product, within 90 days, one per product, still moderated | **Accepted**; implementation blocked on Phase 3 identity — disable the public endpoint until then |
+| 7.4 | Delivery areas, fees, windows, authority | **ADR-018** — zone model, fee/threshold moved into `system_settings`, server-side hours in `Africa/Nairobi`, Admin 1 configures / Admin 2 executes | **Proposed** — needs the zone list, the standard fee and the free-delivery threshold. Blocks Phase 5, not this matrix |
+| 7.5 | Authentication mechanism | **ADR-019** — server-side sessions, HttpOnly cookie, Argon2id, immediate revocation, no tokens in query strings | **Accepted**; verify cookie behaviour against the real deployment origin |
+| 7.6 | Refunds in launch scope? | **ADR-020** — yes; requested by Admin 2, approved by Admin 1/Super, executed manually, recorded; no auto-restock; partial refunds allowed | **Accepted — ratified 2026-11-05** |
 
-Still unresolved from §18 and not answerable by engineering: **product variants** (deferred
-by ADR-020's companion note; `sku` uniqueness is added now), **promotions/discount
+Three consequential decisions were ratified at the same time and are recorded as their own
+ADRs: **ADR-021** money as integer cents with whole-shilling prices, **ADR-022** revenue =
+settlement minus executed refunds, and **ADR-023** a single stock location. ADR-023 matters to
+this matrix because `inventory.stock.adjust` is granted on the assumption that one number is
+being adjusted.
+
+Still unresolved from §18 and not answerable by engineering: **product variants** (in the ADR
+register's "Deferred" section; `sku` uniqueness is added now), **promotions/discount
 precedence**, **tax/invoice requirements**, **email/SMS/WhatsApp provider choice and
 budget**, **data retention and Kenyan privacy obligations**, and **production hosting,
 domain, TLS and backup arrangements**.
@@ -480,9 +487,19 @@ shape is the single error contract for every failure.
 
 | Role | Name | Date | Decision |
 |---|---|---|---|
-| Product owner | | | ☐ approve ☐ changes |
+| Product owner | *(initial here)* | 2026-11-05 | ☑ approve ☐ changes |
 | Super Admin (technical) | | | ☐ approve ☐ changes |
 
-Approval closes §19 step 2 and unblocks Phase 3 (§13 exit criterion: "role lifecycle and
-authorization tests pass"). §7 items must be resolved or explicitly deferred with a
-recorded decision.
+**Basis for the product-owner approval:** the four business questions that gated §7 were put to
+the product owner on 2026-11-05 and answered — pricing authority, refunds in launch scope, the
+revenue definition, and a single stock location — with the instruction to complete ratification
+and proceed. That satisfies this document's own condition: §7 items are resolved or explicitly
+deferred with a recorded decision. **ADR-018's delivery terms are the one explicit deferral**,
+recorded as Proposed with the three inputs it needs.
+
+The Super Admin (technical) row is left blank deliberately: it is the sign-off that the
+permission keys, the `[own]` scoping rule and assertions B1–B17 are implementable as written,
+which is a technical review rather than a business decision and has not been performed.
+
+Approval of the product-owner row closes §19 step 2 and unblocks Phase 3 (§13 exit criterion:
+"role lifecycle and authorization tests pass").

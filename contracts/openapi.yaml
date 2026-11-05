@@ -36,14 +36,13 @@ info:
        browser-called operation. Order confirmation in the UI must poll this resource.
     3. **Permissions are declared per operation.** Every non-public operation carries
        `x-permissions` listing the permission keys from
-       `docs/phase-1-actor-permission-matrix.md`. `x-scoped: own` marks permissions evaluated
-       against the caller's own resources, which is the backend check that a frontend guard
-       can never substitute for (ADR-013). Ownership is part of authorisation: a `[own]`
-       caller sees a resource only when it belongs to them — unless they separately hold the
-       unscoped variant (`ordering.orders.read.all`, `payments.records.read.all`), which is how
-       one key serves both a customer's own records and a staff member's all-records view
-       without a third code path. The generated client, the authorisation middleware
-       and the privilege-escalation test suite all read the same list.
+       `docs/phase-1-actor-permission-matrix.md`. `x-scoped: own` means ownership is part of
+       authorisation — the backend check a frontend guard can never substitute for (ADR-013).
+       A `[own]` caller sees a resource only when it belongs to them, unless they separately
+       hold the unscoped variant (`ordering.orders.read.all`, `payments.records.read.all`),
+       which is how one key serves both a customer's own records and a staff member's
+       all-records view without a third code path. The generated client, the authorisation
+       middleware and the privilege-escalation test suite all read the same list.
     4. **State changes are idempotent.** Order placement, STK Push initiation and callback
        application are protected: `Idempotency-Key` on the first two,
        `provider_transaction_id` uniqueness on the third. A replay returns the original
@@ -1863,7 +1862,7 @@ components:
         price_cents:
           allOf:
             - $ref: '#/components/schemas/Cents'
-            - description: 'Whole shillings only: `price_cents % 100 = 0` (ADR-021 candidate). This is what makes the Daraja amount and the order total identical rather than approximately equal.'
+            - description: 'Whole shillings only: `price_cents % 100 = 0` (ADR-021, Accepted). This is what makes the Daraja amount and the order total identical rather than approximately equal.'
           examples: [120000]
         compare_at_price_cents: { type: integer }
         category_id: { type: integer, format: int64 }
