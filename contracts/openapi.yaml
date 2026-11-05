@@ -1,0 +1,2483 @@
+openapi: 3.1.0
+
+info:
+  title: Naoja Retail Shop API
+  version: 1.0.0-draft
+  summary: First target contract — authentication, products, cart, checkout, orders, payments
+  description: |
+    Implements §19 step 4 of the reform decisions ("Write the first OpenAPI contract for
+    authentication, products, cart, checkout, orders and payments") under §11's API
+    standards: versioned REST under `/api/v1`, documented request/response schemas, errors,
+    auth requirements and permissions, and consistent pagination, filtering, sorting and
+    validation errors.
+
+    This file **is** the contract. TypeScript types for the frontend are generated from it,
+    and the Go implementation is validated against it (§11's "generate or validate
+    TypeScript API types from the OpenAPI contract to reduce frontend/backend drift").
+
+    ---
+
+    ## Five rules this contract enforces structurally
+
+    These are not conventions the implementation is free to ignore; each one is expressed in
+    the schema so that a handler which violates it cannot be written without visibly
+    contradicting the contract.
+
+    1. **Money is server-authoritative and integer.** Every monetary field is an `int64`
+       count of **cents**; no field is ever a float. No request body in this contract accepts
+       a total, a subtotal, a unit price or a payment amount from the client — those appear
+       only in responses, computed from catalogue prices plus `system_settings`. This is what
+       makes the current `POST /orders` (which reads `total_amount`, `payment_status` and
+       `mpesa_transaction_id` straight out of the request body) impossible.
+    2. **Payment state comes from the backend.** A client learns a payment succeeded only
+       from `GET /orders/{reference}/payment`, whose value is written by the verified Daraja
+       callback (`POST /payments/daraja/callback`) or a reconciliation run. No endpoint
+       accepts a client assertion of payment, and `paid` is unreachable from any
+       browser-called operation. Order confirmation in the UI must poll this resource.
+    3. **Permissions are declared per operation.** Every non-public operation carries
+       `x-permissions` listing the permission keys from
+       `docs/phase-1-actor-permission-matrix.md`. `x-scoped: own` marks permissions evaluated
+       against the caller's own resources, which is the backend check that a frontend guard
+       can never substitute for (ADR-013). Ownership is part of authorisation: a `[own]`
+       caller sees a resource only when it belongs to them — unless they separately hold the
+       unscoped variant (`ordering.orders.read.all`, `payments.records.read.all`), which is how
+       one key serves both a customer's own records and a staff member's all-records view
+       without a third code path. The generated client, the authorisation middleware
+       and the privilege-escalation test suite all read the same list.
+    4. **State changes are idempotent.** Order placement, STK Push initiation and callback
+       application are protected: `Idempotency-Key` on the first two,
+       `provider_transaction_id` uniqueness on the third. A replay returns the original
+       result; it never creates a second order, a second phone prompt or a second settlement.
+    5. **No secret and no credential travels in a URL.** Authentication is an `HttpOnly`
+       session cookie plus a CSRF header (ADR-019). There is no `access_token`, `token` or
+       API key query parameter anywhere in this contract, which closes the current
+       `?token=` exposure on the analytics stream and the CSV export.
+
+    ## Deliberate exclusions from this increment
+
+    - **Guest checkout.** `ordering.orders.create` is granted to Customer only, so an
+      unauthenticated visitor can browse and build a cart but cannot place an order. That is
+      a product decision, not an oversight; it is also the only reason the current
+      unauthenticated order endpoint is not being "migrated".
+    - **Password recovery.** `identity.account.recover` exists in the matrix, but the reset
+      flow depends on choosing an email provider (§18 open item). Drafting endpoints now would
+      invent a delivery mechanism the business has not picked.
+    - **Inventory adjustments, fulfilment, reviews, promotions, analytics.** Each gets its own
+      contract increment when its phase is built (§12's "sequence of small, verifiable
+      migrations"). `available_quantity` is exposed here because stock availability is part of
+      what makes a storefront honest, but the adjustment endpoints are not.
+  contact:
+    name: Naoja reform branch
+  license:
+    name: Proprietary
+
+servers:
+  - url: https://api.naoja.co.ke/api/v1
+    description: Production (domain undecided in §18; placeholder, must be replaced at cutover)
+  - url: http://localhost:4000/api/v1
+    description: Local development against the Go service
+
+tags:
+  - name: Authentication
+    description: Session lifecycle for Guest, Customer and administrative principals (ADR-019).
+  - name: Catalogue
+    description: Public product and category reads; staff catalogue writes.
+  - name: Cart
+    description: Guest and customer carts, priced on read.
+  - name: Checkout
+    description: Server-side quoting and order placement (transaction boundary T-01).
+  - name: Orders
+    description: Order reads, transitions, cancellation and tracking (ADR-015).
+  - name: Payments
+    description: Daraja STK Push, authoritative payment state, callbacks, reconciliation, refunds (ADR-020).
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Global: cookie session + CSRF on every unsafe method.
+# An operation that needs no auth overrides this with security: [].
+# ─────────────────────────────────────────────────────────────────────────────
+security:
+  - sessionCookie: []
+    csrfHeader: []
+
+paths:
+
+  # ═══════════════════════════ AUTHENTICATION ═══════════════════════════
+  /auth/register:
+    post:
+      tags: [Authentication]
+      operationId: register
+      summary: Create a Customer account
+      description: |
+        Public. Rate-limited (`authLimiter`, tightened per §10's "rate limits on
+        authentication endpoints"). Password is hashed with Argon2id; the plaintext value is
+        never logged, echoed or stored.
+
+        On success a session cookie is issued and the guest cart held by this browser is
+        merged into the new account's cart rather than abandoned.
+
+        A freshly registered account holds `ordering.orders.create` only once the §18
+        verification question is answered; see matrix story G4. `email_verified_at` is
+        exposed so the client can show that state without inferring it from a failed order.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+            example:
+              full_name: "Achieng' Otieno"
+              email: "achieng.example@mail.test"
+              phone: "0712345678"
+              password: "correct horse battery staple"
+      responses:
+        '201':
+          description: Account created and signed in.
+          headers:
+            Set-Cookie:
+              $ref: '#/components/headers/SetSessionCookie'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Session'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /auth/login:
+    post:
+      tags: [Authentication]
+      operationId: login
+      summary: Start a session
+      description: |
+        Public. One endpoint for every actor; the role that comes back is whatever the
+        account holds, so there is no separate "admin login" surface to keep secret — the
+        current frontend's hardcoded `naojaventures@gmail.com` / `naoja@1540` fallback and
+        the env-var backdoor at `auth.js:122` both disappear with it.
+
+        Failures do not disclose whether the email exists (matrix C1: "recovery does not
+        disclose whether an email exists" — the same rule applies here).
+
+        Rate-limited and lockout-protected on the pair of (account, client address).
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Signed in.
+          headers:
+            Set-Cookie:
+              $ref: '#/components/headers/SetSessionCookie'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Session'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '423':
+          description: Account temporarily locked after repeated failures.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /auth/logout:
+    post:
+      tags: [Authentication]
+      operationId: logout
+      summary: Revoke the current session
+      description: |
+        Revokes exactly one session. Idempotent — calling it with an already-revoked cookie
+        succeeds and does nothing, because reporting "not signed in" here would leak session
+        state to a caller who no longer has it.
+      x-permissions: []          # any authenticated principal; ending your own session needs no grant
+      responses:
+        '204':
+          description: Session revoked.
+          headers:
+            Set-Cookie:
+              $ref: '#/components/headers/ClearSessionCookie'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /auth/session:
+    get:
+      tags: [Authentication]
+      operationId: getSession
+      summary: Describe the current principal
+      description: |
+        The single source of truth the frontend uses for conditional rendering. `permissions`
+        is the **effective** set — role grants unioned with unexpired exceptional grants — so
+        a UI never has to reimplement role arithmetic.
+
+        This is UX only. Every protected operation is still authorised independently from its
+        own `x-permissions` declaration; a tampered client that claims extra permissions
+        changes nothing about what the backend allows (ADR-013).
+
+        `csrf_token` is returned here for the client to send as `X-CSRF-Token` on unsafe
+        methods.
+      x-permissions: []          # any authenticated principal, no specific permission
+      responses:
+        '200':
+          description: Current principal.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Session'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /auth/password/change:
+    post:
+      tags: [Authentication]
+      operationId: changePassword
+      summary: Change own password
+      description: |
+        `[own]` — always authenticated as the account being changed; there is no path from
+        this operation to another user's password, which is the hole the current
+        `PUT /api/auth/change-password` open by accepting the env password as a permanent
+        master key (`auth.js:122`).
+
+        Changing a password revokes **all other sessions** for that account and audits the
+        event (no password material in the audit record).
+      x-permissions:
+        - identity.account.update
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChangePasswordRequest'
+      responses:
+        '204':
+          description: Password changed; other sessions revoked.
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  # ═══════════════════════════ CATALOGUE ═══════════════════════════
+  /products:
+    get:
+      tags: [Catalogue]
+      operationId: listProducts
+      summary: Browse the storefront catalogue
+      description: |
+        Public. Returns **only** `publication_state = published` products — visibility is a
+        server-side filter, never a client-side one, so an unpublished product cannot be
+        reached by dropping a guard.
+
+        `q` is a PostgreSQL full-text search (§9's "consider PostgreSQL full-text search
+        before adding a separate search engine"), replacing the three `$regex` collection
+        scans that cannot use an index.
+      security: []
+      x-permissions: []
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - $ref: '#/components/parameters/Sort'
+        - name: category
+          in: query
+          description: Category slug.
+          schema: { type: string }
+        - name: q
+          in: query
+          description: Full-text query over name, description and subcategory.
+          schema: { type: string }
+        - name: featured
+          in: query
+          schema: { type: boolean }
+        - name: in_stock
+          in: query
+          description: Restrict to products with `available_quantity > 0`.
+          schema: { type: boolean }
+        - name: min_price_cents
+          in: query
+          schema: { $ref: '#/components/schemas/Cents' }
+        - name: max_price_cents
+          in: query
+          schema: { $ref: '#/components/schemas/Cents' }
+      responses:
+        '200':
+          description: A page of published products.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductList'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    post:
+      tags: [Catalogue]
+      operationId: createProduct
+      summary: Create a catalogue item
+      description: |
+        Creates in `draft`; publication is a separate, explicit act so a half-entered product
+        cannot appear on the storefront. `sku` is required and unique (§5 workflow step 2 —
+        the current model has no SKU at all).
+      x-permissions:
+        - catalogue.products.create
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProductCreateRequest'
+      responses:
+        '201':
+          description: Created as `draft`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductDetail'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /products/{reference}:
+    get:
+      tags: [Catalogue]
+      operationId: getProduct
+      summary: Inspect one product
+      description: |
+        Public. `reference` accepts the slug or the numeric id — the storefront is built on
+        slugs and the admin tools on ids, and forcing both through one lookup keeps the two
+        from disagreeing about what a product is.
+
+        A view is recorded to `analytics.events` **asynchronously** (T-09). Reading a product
+        must not write to it, or the hottest endpoint in the shop becomes uncacheable.
+      security: []
+      x-permissions: []
+      parameters:
+        - $ref: '#/components/parameters/ProductReference'
+      responses:
+        '200':
+          description: The product.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductDetail'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /categories:
+    get:
+      tags: [Catalogue]
+      operationId: listCategories
+      summary: List categories
+      description: |
+        Public. `product_count` is **computed** in the response, not read from a stored
+        column — the current model persists it (`Category.product_count`) and it drifts the
+        moment a product is unpublished.
+      security: []
+      x-permissions: []
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: A page of active categories.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CategoryList'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /products/{id}:
+    patch:
+      tags: [Catalogue]
+      operationId: updateProduct
+      summary: Update catalogue details
+      description: |
+        Partial update of description, images, category, brand, specifications.
+        **`price_cents` is not accepted here** — it is rejected with
+        `PRICE_CHANGE_NOT_ALLOWED` and must go through `/products/{id}/price-changes`, which
+        forces a reason. Making the cheap path refuse the sensitive field is what guarantees
+        the sensitive field cannot be changed casually.
+      x-permissions:
+        - catalogue.products.update
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProductUpdateRequest'
+      responses:
+        '200':
+          description: Updated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductDetail'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    delete:
+      tags: [Catalogue]
+      operationId: archiveProduct
+      summary: Archive a product
+      description: |
+        Products are **never hard-deleted** while they appear in any order: `order_lines`
+        snapshot name and sku precisely so history survives. A product with order history is
+        archived; `catalogue.products.delete` exists in the matrix only for products that have
+        never been ordered. Attempting to delete a referenced product returns 409
+        `PRODUCT_HAS_ORDER_HISTORY`.
+      x-permissions:
+        - catalogue.products.archive
+        - catalogue.products.delete
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '204':
+          description: Deleted (only when no order references it).
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /products/{id}/price-changes:
+    post:
+      tags: [Catalogue]
+      operationId: changeProductPrice
+      summary: Change a product price with a recorded reason
+      description: |
+        ADR-016. `reason` is **required** and the previous value, new value, actor and
+        timestamp land in `audit_logs` in the same transaction as the update (T-10).
+
+        The change applies **prospectively only**. Order lines carry an immutable
+        `unit_price_cents` snapshot, so this operation can never alter the total of an order
+        that already exists — boundary assertion B17. Bulk and scheduled re-pricing are out of
+        launch scope; a single product per call is the only shape offered.
+      x-permissions:
+        - catalogue.products.update_price
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PriceChangeRequest'
+      responses:
+        '200':
+          description: Price changed from the next quote onward.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditReceipt'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /products/{id}/publication:
+    put:
+      tags: [Catalogue]
+      operationId: setProductPublication
+      summary: Publish or unpublish a product
+      description: |
+        State transition, not a boolean flip: the reason a product leaves the storefront is
+        recorded. `archived` is terminal. Stock status never affects visibility and visibility
+        never affects stock — the current model conflates them into one `status` field.
+      x-permissions:
+        - catalogue.products.publish
+        - catalogue.products.unpublish
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PublicationRequest'
+      responses:
+        '200':
+          description: New publication state.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductDetail'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  # ═══════════════════════════ CART ═══════════════════════════
+  /cart:
+    get:
+      tags: [Cart]
+      operationId: getCart
+      summary: Read the current cart, priced server-side
+      description: |
+        Returns the caller's cart, creating an empty one on first read. A Guest cart is bound
+        to a signed `cart_token` cookie; a Customer cart is bound to the session. At login or
+        registration the guest cart is merged into the customer cart (`carts.merged_into_cart_id`).
+
+        Prices and availability are recomputed on **every** read. A line whose catalogue price
+        moved since it was added is flagged in `line_issues` rather than silently repriced —
+        the shopper sees the change before checkout, and the cart total is never the number
+        that gets charged anyway (it is recomputed again in the quote).
+      x-permissions:
+        - shopping.cart.read
+      x-scoped: own
+      responses:
+        '200':
+          description: The current cart.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Cart'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    delete:
+      tags: [Cart]
+      operationId: clearCart
+      summary: Empty the cart
+      x-permissions:
+        - shopping.cart.modify
+      x-scoped: own
+      responses:
+        '204':
+          description: Cart emptied.
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /cart/items:
+    post:
+      tags: [Cart]
+      operationId: addCartItem
+      summary: Add a product to the cart
+      description: |
+        Quantity is checked against currently available stock, but the check is advisory:
+        stock is only *committed* at order placement (T-01), so two shoppers can both see 3
+        left and only one will get all three.
+      x-permissions:
+        - shopping.cart.modify
+      x-scoped: own
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CartItemAddRequest'
+      responses:
+        '201':
+          description: Added; the whole cart is returned so the client never patches its own copy.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Cart'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /cart/items/{productId}:
+    patch:
+      tags: [Cart]
+      operationId: updateCartItem
+      summary: Set a line's quantity
+      x-permissions:
+        - shopping.cart.modify
+      x-scoped: own
+      parameters:
+        - $ref: '#/components/parameters/ProductIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CartItemUpdateRequest'
+      responses:
+        '200':
+          description: Updated cart.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Cart'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    delete:
+      tags: [Cart]
+      operationId: removeCartItem
+      summary: Remove a line
+      x-permissions:
+        - shopping.cart.modify
+      x-scoped: own
+      parameters:
+        - $ref: '#/components/parameters/ProductIdPath'
+      responses:
+        '204':
+          description: Line removed.
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  # ═══════════════════════════ CHECKOUT ═══════════════════════════
+  /checkout/quotes:
+    post:
+      tags: [Checkout]
+      operationId: createQuote
+      summary: Price the cart for a specific fulfilment choice
+      description: |
+        **The pricing step is where authority lives.** The request supplies intent —
+        fulfilment method, destination, contact details — and nothing else. Subtotal, delivery
+        fee, discount and total are all computed server-side from catalogue prices and
+        `system_settings` (`delivery_standard_fee_cents`, `free_delivery_threshold_cents`,
+        the zone fee for the chosen zone).
+
+        The quote snapshots those prices and expires. If the catalogue or the fee settings
+        move before the order is placed, placement re-quotes and returns
+        `QUOTE_STALE` with the new figure rather than honouring the stale one.
+
+        `fulfilment_method` also determines which ADR-015 path the order can take later:
+        `pickup` orders reach `ready`, `delivery` orders reach `dispatched`, and neither can
+        reach the other's state.
+      x-permissions:
+        - ordering.orders.create
+      x-scoped: own
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QuoteRequest'
+      responses:
+        '201':
+          description: A priced, expiring quote.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Quote'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /orders:
+    post:
+      tags: [Checkout]
+      operationId: placeOrder
+      summary: Convert a quote into an order (T-01)
+      description: |
+        The only request body is the quote id and optional notes. **No amount, no line, no
+        payment status is accepted from the client.**
+
+        Behaviour, all inside one transaction:
+        - Re-prices every line against the catalogue and refuses if a price moved
+          (`QUOTE_STALE`) — the shopper is asked to confirm the new total, never silently
+          re-charged.
+        - Re-checks stock and reserves it with an atomic conditional update per line, in
+          ascending `product_id` order (deterministic ordering prevents the deadlock two
+          multi-line carts would otherwise create). Any shortfall rolls the whole order back
+          and reports which product.
+        - Issues `reference` from a sequence, never `count(*) + 1` (the current generator
+          collides under concurrency).
+        - Sets `status = pending` and `expires_at = now + reservation_ttl_minutes`.
+
+        `Idempotency-Key` is required: a retried placement returns the order it first created
+        instead of a second one.
+      x-permissions:
+        - ordering.orders.create
+      x-scoped: own
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PlaceOrderRequest'
+      responses:
+        '201':
+          description: Order placed, stock reserved, awaiting payment.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderDetail'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+        '409':
+          description: |
+            `QUOTE_STALE` (prices moved), `STOCK_INSUFFICIENT` (with the offending
+            `product_id`s), or `IDEMPOTENCY_KEY_CONFLICT` (key reused with a different body).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StockConflict'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    get:
+      tags: [Orders]
+      operationId: listOrders
+      summary: List orders
+      description: |
+        Two different result sets from one operation, decided entirely by what the caller
+        holds — this is the check a frontend guard can never stand in for:
+        - `ordering.orders.read` `[own]` → only the caller's own orders.
+        - `ordering.orders.read.all` → every order, subject to the filters.
+        A caller holding neither gets 403, and a caller holding `[own]` cannot widen the
+        result with filters: `customer_id` is ignored rather than honoured for them.
+      x-permissions:
+        - ordering.orders.read
+        - ordering.orders.read.all
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - $ref: '#/components/parameters/Sort'
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/OrderStatus'
+        - name: payment_status
+          in: query
+          schema:
+            $ref: '#/components/schemas/PaymentStatus'
+        - name: fulfilment_method
+          in: query
+          schema:
+            $ref: '#/components/schemas/FulfilmentMethod'
+        - name: customer_id
+          in: query
+          description: Ignored unless the caller holds `ordering.orders.read.all`.
+          schema: { type: integer, format: int64 }
+        - name: placed_from
+          in: query
+          description: RFC3339 instant; UTC in, UTC stored.
+          schema: { type: string, format: date-time }
+        - name: placed_to
+          in: query
+          schema: { type: string, format: date-time }
+        - name: q
+          in: query
+          description: Order reference or customer name/phone prefix.
+          schema: { type: string }
+      responses:
+        '200':
+          description: A page of orders.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderList'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /orders/track:
+    post:
+      tags: [Orders]
+      operationId: trackOrder
+      summary: Track an order by reference plus verified contact (matrix G3)
+      description: |
+        Public but **two-factor**: the reference *and* the phone supplied at placement.
+        Deliberately a POST so neither travels in a URL — query strings end up in access
+        logs, browser history and referrer headers, which is how the current
+        `GET /api/mpesa/order-status/:orderRef` leaks an order's whole record to anyone who
+        guesses a reference.
+
+        Returns an `OrderTracking` projection only: status, transition dates, fulfilment
+        summary. **Never** the full address, the line contents' prices, or any payment record.
+        Aggressively rate-limited per client address, and mismatches are indistinguishable
+        from "no such order" so references cannot be enumerated.
+
+        A POST with no session and no CSRF requirement — the pairing of reference + phone is
+        the credential here.
+      security: []
+      x-permissions:
+        - ordering.orders.track
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TrackRequest'
+      responses:
+        '200':
+          description: A minimal tracking view.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderTracking'
+        '404':
+          description: No order matches that reference **and** phone. Same response either way.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /orders/{reference}:
+    get:
+      tags: [Orders]
+      operationId: getOrder
+      summary: Read one order in full
+      description: |
+        Allowed for the order's own customer (`ordering.orders.read` `[own]`), or any holder
+        of `ordering.orders.read.all`. A second customer asking for someone else's order
+        reference gets **404, not 403** — 403 confirms the reference exists.
+      x-permissions:
+        - ordering.orders.read
+        - ordering.orders.read.all
+      x-scoped: own
+      parameters:
+        - $ref: '#/components/parameters/OrderReference'
+      responses:
+        '200':
+          description: The order, its lines, payment summary and status history.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderDetail'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /orders/{reference}/cancel:
+    post:
+      tags: [Orders]
+      operationId: cancelOrder
+      summary: Cancel an order and release its stock (T-04)
+      description: |
+        Allowed on `pending` and `confirmed` orders only; anything later needs a status
+        transition by staff. `reason` is required and lands in `order_status_history`.
+
+        Cancellation is **idempotent by construction**: reservations are keyed
+        `UNIQUE (order_id, product_id)` and only `active` ones are released, so the current
+        bug where cancelling twice added stock twice cannot be expressed.
+
+        Cancelling does not move money. A `paid` order that is cancelled becomes `refunded`
+        only when a refund is executed (ADR-015 rule 6); until then the payment stays `paid`
+        and the cancellation is an exception for the reconciliation queue, not a silent
+        success.
+      x-permissions:
+        - ordering.orders.cancel
+        - ordering.orders.process
+      x-scoped: own
+      parameters:
+        - $ref: '#/components/parameters/OrderReference'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CancelRequest'
+      responses:
+        '200':
+          description: Cancelled and stock released.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderDetail'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+        '409':
+          description: Not cancellable from the order's current status.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransitionConflict'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /orders/{reference}/status:
+    post:
+      tags: [Orders]
+      operationId: transitionOrder
+      summary: Advance an order along the ADR-015 state machine
+      description: |
+        **Adjacent transitions only.** The permitted set is the ADR-015 table; anything else
+        is rejected by `ordering.orders.process` alone and requires
+        `ordering.orders.status.override` — Admin 1 or Super — with a mandatory `reason`
+        recorded in `order_status_history` (boundary assertion B16). This is the specific
+        control that stops an operations session from relabelling a stuck order.
+
+        `payment_status` is a **separate machine** and is not reachable from this operation;
+        `pending → confirmed` requires the payment to be `paid`, and only the callback can
+        make it `paid`. Delivery-bearing transitions move `deliveries` and `orders` in one
+        transaction (T-07), so `dispatched` cannot exist without a matching `in_transit`
+        delivery event.
+
+        `pickup` orders may target `ready`; `delivery` orders may target `dispatched`. The
+        two are mutually exclusive by `fulfilment_method`.
+      x-permissions:
+        - ordering.orders.process
+        - ordering.orders.status.override
+      parameters:
+        - $ref: '#/components/parameters/OrderReference'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrderTransitionRequest'
+      responses:
+        '200':
+          description: Transition applied and recorded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderDetail'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+        '409':
+          description: |
+            `TRANSITION_NOT_ALLOWED` (outside the table and no override permission),
+            `OVERRIDE_REASON_REQUIRED`, or `METHOD_CONFLICT` (pickup/delivery mismatch).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransitionConflict'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  # ═══════════════════════════ PAYMENTS ═══════════════════════════
+  /orders/{reference}/payment:
+    get:
+      tags: [Payments]
+      operationId: getOrderPayment
+      summary: The authoritative payment state of an order
+      description: |
+        **This is the only answer to "has it been paid?"** The client polls it after firing
+        STK Push and treats `paid` as confirmed only when it comes back from here — the
+        redirect, the phone toast and the frontend success flag are all UI events, not
+        evidence of settlement (§10's payment-integrity rule; it replaces `isPaid` derived
+        from client state at `CheckoutPage.jsx:198`).
+
+        `amount_paid_cents` is populated only from a verified provider transaction, and the
+        `paid_requires_exact_amount` database constraint means a status of `paid` can never
+        coexist with a shortfall. `reconciliation_required` is the honest third answer:
+        money moved, but not in the amount expected.
+      x-permissions:
+        - payments.status.read
+      x-scoped: own
+      parameters:
+        - $ref: '#/components/parameters/OrderReference'
+      responses:
+        '200':
+          description: Current payment state.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Payment'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /orders/{reference}/payment/stk-push:
+    post:
+      tags: [Payments]
+      operationId: initiateStkPush
+      summary: Ask Daraja to prompt the customer's phone (T-02)
+      description: |
+        Accepts **only a phone number**. The amount is read from `payments.amount_owed_cents`
+        server-side; the current `POST /api/mpesa/stkpush` takes `amount` from the request
+        body (`mpesa.js:65`) and that path does not exist here.
+
+        Because prices are whole shillings (`price_cents % 100 = 0`), `amount_cents / 100`
+        equals the order total exactly — no `Math.ceil` and no reconciliation gap between
+        what is owed and what is charged.
+
+        At most one attempt in `initiated|pending` per payment: a second call returns the
+        existing attempt instead of prompting the phone twice. `merchant_request_id`
+        (CheckoutRequestID) is returned so the client can correlate, but it is not proof of
+        anything — poll the payment resource.
+      x-permissions:
+        - payments.initiate
+      x-scoped: own
+      parameters:
+        - $ref: '#/components/parameters/OrderReference'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StkPushRequest'
+      responses:
+        '202':
+          description: Prompt sent to the handset; settlement is still unknown.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentAttempt'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+        '409':
+          description: Order already settled, expired, or cancelled.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransitionConflict'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '502':
+          description: Daraja rejected or was unreachable; the attempt is recorded as `failed`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProviderError'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /payments/daraja/callback:
+    post:
+      tags: [Payments]
+      operationId: receiveDarajaCallback
+      summary: Verified Safaricom callback (T-03) — never called by the frontend
+      description: |
+        Backend-to-backend. Credentialed by `callbackAuth` (HTTP Basic, configured on the
+        Daraja portal) **and** reachable only server-side; `payments.callback.receive` is a
+        system credential, not a user role, so no session can satisfy it. The current
+        `POST /api/mpesa/callback` is unauthenticated and accepts whatever payload arrives;
+        this one must fail verification before it touches a record.
+
+        Four-step idempotent application, in this order:
+        1. Insert the transaction keyed on `provider_transaction_id` (MpesaReceiptNumber).
+           A unique violation means it was already applied — commit and ACK, do nothing else.
+        2. Locate the order by `payment_attempts.provider_request_id` **only**. The
+           phone-number-suffix fallback that could mark an unrelated order paid is deleted
+           with no replacement.
+        3. Status-guarded update: `WHERE status IN ('pending','expired')`. Zero rows means
+           already settled; no-op.
+        4. Amount check against `amount_owed_cents`; a shortfall leaves the payment `pending`
+           and raises a reconciliation alert rather than forcing the transition.
+
+        Then, in the same transaction: order `pending → confirmed`, reservations →`consumed`,
+        stock movements (reason `sale`), audit entry, and one outbox event for the
+        confirmation email.
+
+        **Always returns 200 with `ResultStatus: 0`** once the payload is stored, even if the
+        business outcome was a no-op or a mismatch — a non-200 makes Safaricom retry, and
+        retries are exactly what the idempotency above is designed to absorb.
+      security:
+        - callbackAuth: []
+      x-permissions:
+        - payments.callback.receive
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DarajaCallbackPayload'
+      responses:
+        '200':
+          description: ACK to Safaricom. Body is the Daraja-shaped acknowledgement, not our Error schema.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DarajaCallbackAck'
+        '401':
+          description: Verification failed; nothing was read or written.
+        '500':
+          description: |
+            Only for a failure to persist the payload at all. A processed-but-rejected
+            payment is a 200, never a 500.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /payments/{id}/reconciliation:
+    post:
+      tags: [Payments]
+      operationId: reconcilePayment
+      summary: Ask Daraja what it thinks happened
+      description: |
+        Runs a Daraja `checkout/query` for the payment's outstanding attempts and applies any
+        verified result through the same T-03 path, so a lost or never-delivered callback can
+        still settle an order. This is the endpoint that replaces the current
+        unauthenticated `POST /api/mpesa/query`, which let any caller write `paid`.
+
+        Writes `reconciliation_runs` and an audit entry. Safe to call repeatedly: T-03's
+        idempotency makes a second application of the same transaction a no-op.
+      x-permissions:
+        - payments.reconcile
+      parameters:
+        - $ref: '#/components/parameters/PaymentIdPath'
+      responses:
+        '200':
+          description: Reconciliation outcome.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReconciliationResult'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '502':
+          $ref: '#/components/responses/ProviderUnavailable'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /payments/{id}/status-overrides:
+    post:
+      tags: [Payments]
+      operationId: overridePaymentStatus
+      summary: Settle a payment by hand — Admin 1 or Super only
+      description: |
+        The deliberate exception to "only the callback can make a payment paid", for the case
+        where money genuinely arrived and the provider record cannot be repaired. Not held by
+        Admin 2: the current panel lets any admin session flip `payment_status` from a
+        dropdown with no reason recorded, which is precisely the privileged-state access §15
+        requires be unavailable by default.
+
+        `reason` is mandatory, the audit record carries previous and new value, and the
+        override cannot produce `paid` with a mismatched amount —
+        `paid_requires_exact_amount` applies to overrides too. Recorded as a
+        `reconciliation_runs` entry so analytics can distinguish reconciled revenue from
+        callback-confirmed revenue.
+      x-permissions:
+        - payments.status.override
+      parameters:
+        - $ref: '#/components/parameters/PaymentIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PaymentOverrideRequest'
+      responses:
+        '200':
+          description: Overridden and audited.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Payment'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+        '409':
+          description: Target state unreachable, or amount does not match.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransitionConflict'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /payments/{id}/refund-requests:
+    post:
+      tags: [Payments]
+      operationId: requestRefund
+      summary: Open a refund request (ADR-020)
+      description: |
+        Holdable by Admin 2, which is why request is separated from approval: an operations
+        agent can raise a refund, only Admin 1 or Super can authorise it (boundary assertion
+        B15). Requires the payment to be `paid`, and the amount must not exceed what was
+        actually paid — a bound that crosses tables, so it is enforced in the use case inside
+        the transaction rather than by a CHECK constraint.
+      x-permissions:
+        - payments.refund.request
+      parameters:
+        - $ref: '#/components/parameters/PaymentIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefundRequest'
+      responses:
+        '201':
+          description: Request created in `requested`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Refund'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+        '409':
+          description: Payment not `paid`, amount exceeds amount paid, or a request is already open.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /refunds/{id}/decision:
+    post:
+      tags: [Payments]
+      operationId: decideRefund
+      summary: Approve or reject a refund request
+      description: |
+        Admin 1 or Super. Approval does not move money — it authorises a human to move it.
+        Rejection requires its own reason and leaves the payment untouched.
+      x-permissions:
+        - payments.refund
+      parameters:
+        - $ref: '#/components/parameters/RefundIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefundDecisionRequest'
+      responses:
+        '200':
+          description: Decision recorded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Refund'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+        '409':
+          description: Refund is not in `requested`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /refunds/{id}/execution:
+    post:
+      tags: [Payments]
+      operationId: recordRefundExecution
+      summary: Record that the refund was actually paid out
+      description: |
+        ADR-020: disbursement happens **outside the application** (M-Pesa till reversal, cash,
+        bank transfer) and this endpoint records it. `provider_reference` and `executed_at` are
+        what make the claim "refunded" mean something rather than being a label.
+
+        Recording execution moves `payments → refunded` and `orders → refunded` only once the
+        cumulative executed amount covers the paid amount. **It never restocks** — returned
+        goods reach stock through an explicit `adjustment` or `return` stock movement, so the
+        physical count and the system count stay truthful about different things (T-08).
+      x-permissions:
+        - payments.refund
+      parameters:
+        - $ref: '#/components/parameters/RefundIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefundExecutionRequest'
+      responses:
+        '200':
+          description: Execution recorded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Refund'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+        '409':
+          description: Refund not `approved`, or already executed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+# ═════════════════════════════════════════════════════════════════════════════
+components:
+
+  securitySchemes:
+
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: naoja_session
+      description: |
+        Opaque, server-side session identifier (ADR-019) — `HttpOnly`, `Secure`,
+        `SameSite=Lax`, rotating with lineage recorded in `sessions.replaced_by_session_id`.
+        Revocation is immediate: the row is checked on every request, so a suspended admin or
+        a cancelled membership is out on the next call rather than after token expiry.
+
+        Stateless JWT with refresh tokens was considered and rejected for launch; the
+        reasoning and the conditions that would reopen it are in ADR-019.
+
+    csrfHeader:
+      type: apiKey
+      in: header
+      name: X-CSRF-Token
+      description: |
+        Required on every unsafe method alongside `sessionCookie`. Issued by
+        `GET /auth/session`; must match the session's CSRF secret. Needed because a
+        cookie-bearing request can be forged by another origin, and because the current API
+        has no such protection at all.
+
+    callbackAuth:
+      type: http
+      scheme: basic
+      description: |
+        Used only by `POST /payments/daraja/callback`. A dedicated credential held by the
+        provider integration and configured on the Daraja portal — never issued to a user
+        session, never present in a frontend bundle (§11).
+
+  headers:
+
+    SetSessionCookie:
+      description: |
+        `naoja_session=<opaque>; HttpOnly; Secure; SameSite=Lax; Path=/`
+      schema:
+        type: string
+
+    ClearSessionCookie:
+      description: "naoja_session=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0"
+      schema:
+        type: string
+
+  parameters:
+
+    Page:
+      name: page
+      in: query
+      description: 1-based.
+      schema: { type: integer, minimum: 1, default: 1 }
+    PageSize:
+      name: page_size
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 100, default: 24 }
+    Sort:
+      name: sort
+      in: query
+      description: |
+        Field name, `-` prefix for descending. Only the fields declared per resource are
+        accepted; anything else is a 400 rather than a silent fall-through to an arbitrary
+        column, which is how a sort parameter becomes an information leak.
+      schema:
+        type: string
+        examples: ['-created_at', 'price_cents', '-available_quantity']
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: |
+        Client-generated unique value (UUIDv4 recommended) for a request that must not be
+        performed twice. A retry with the same key and the same body returns the original
+        response and the same body hash; the same key with a different body is a 409
+        `IDEMPOTENCY_KEY_CONFLICT` rather than a second side effect.
+      schema: { type: string, maxLength: 200 }
+    ProductReference:
+      name: reference
+      in: path
+      required: true
+      description: Product slug or numeric id.
+      schema: { type: string }
+    ProductIdPath:
+      name: productId
+      in: path
+      required: true
+      schema: { type: integer, format: int64 }
+    IdPath:
+      name: id
+      in: path
+      required: true
+      schema: { type: integer, format: int64 }
+    OrderReference:
+      name: reference
+      in: path
+      required: true
+      description: |
+        Order reference as issued at placement (`NJ-<year>-<sequence>`). Case-insensitive —
+        `upper(reference)` is the unique index.
+      schema: { type: string, pattern: '^NJ-[0-9]{4}-[0-9]+$' }
+    PaymentIdPath:
+      name: id
+      in: path
+      required: true
+      schema: { type: integer, format: int64 }
+    RefundIdPath:
+      name: id
+      in: path
+      required: true
+      schema: { type: integer, format: int64 }
+
+  responses:
+
+    BadRequest:
+      description: Malformed request — bad JSON, unknown parameter, unparseable sort.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Unauthenticated:
+      description: No valid session. The client should route to login and preserve intent.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    PermissionDenied:
+      description: |
+        Authenticated but not authorised. `details[0].missing_permission` names the
+        permission key so the gap is diagnosable without reading server logs. Note the
+        distinction this contract enforces: **403 means "you may not know this resource
+        exists" is false** — for resources the caller must not learn about, endpoints return
+        404 instead.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/PermissionError' }
+    NotFound:
+      description: No such resource, or none the caller is allowed to be told about.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Conflict:
+      description: |
+        The request conflicts with current state — stock ran short, a sku or slug is taken, an
+        idempotency key was reused with a different body, a transition is not allowed.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    ValidationFailed:
+      description: |
+        Syntactically well-formed but semantically invalid: missing field, weak password,
+        phone not Kenyan/Tanzanian format, negative quantity. Every violation is listed in
+        `details`, keyed by `field`, so the React Hook Form + Zod layer can render them
+        against the inputs that produced them.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ValidationError' }
+    TooManyRequests:
+      description: |
+        Rate limit exceeded (§10). `Retry-After` is set; auth and payment endpoints carry the
+        tightest limits, and tracking is limited hard enough that references cannot be
+        enumerated.
+      headers:
+        Retry-After:
+          description: Seconds until the client may retry.
+          schema: { type: integer }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    ProviderUnavailable:
+      description: |
+        Daraja, Cloudinary or SMTP could not be reached. `provider` and `provider_detail`
+        carry what the upstream said; the request is never reported as succeeded, and any
+        money-related state is left untouched rather than guessed at.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ProviderError' }
+    InternalError:
+      description: |
+        Unexpected failure. The response body carries a `correlation_id` and nothing else —
+        no stack, no SQL, no provider credentials. The full detail goes to the structured log
+        under the same correlation id (§10).
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+
+  schemas:
+
+    # ── Shared primitives ────────────────────────────────────────────────
+    Cents:
+      type: integer
+      format: int64
+      minimum: 0
+      description: |
+        Money as a count of **cents**, never a float and never a string ("KES 1,200" is a
+        rendering, not a value). Whole-shilling prices carry `% 100 = 0`; a value with
+        non-zero cents can only be a computed discount or a provider-supplied amount.
+      examples: [120000, 45000]
+
+    Timestamp:
+      type: string
+      format: date-time
+      description: |
+        RFC3339 in UTC. Presentation in `Africa/Nairobi` is a display-layer concern and never
+        changes what is stored or compared (§9).
+
+    OrderStatus:
+      type: string
+      description: ADR-015 order lifecycle. `shipped` is retired in favour of `dispatched`.
+      enum:
+        - pending        # placed, stock reserved, awaiting settlement
+        - confirmed      # settlement verified, being prepared
+        - processing
+        - ready          # pickup path only
+        - dispatched     # delivery path only
+        - delivered
+        - cancelled
+        - returned
+        - refunded       # terminal side of a return or a cancelled paid order
+        - expired        # payment window closed; a late callback may revive it
+      examples: [pending]
+
+    PaymentStatus:
+      type: string
+      description: |
+        Independent of `OrderStatus` (ADR-015). Machine: `pending → paid|failed|expired`;
+        `failed → pending`; `paid → refunded`; `expired → paid`. `paid` additionally requires
+        `amount_paid_cents = amount_owed_cents` — enforced by the
+        `paid_requires_exact_amount` database constraint, so an underpaid settlement cannot
+        be represented here.
+      enum: [pending, paid, failed, expired, refunded]
+
+    FulfilmentMethod:
+      type: string
+      enum: [pickup, delivery]
+
+    Money:
+      type: object
+      description: |
+        A server-computed amount plus the currency it is in. Currency is carried only where a
+        figure could travel — a single-currency shop does not repeat it on every row or every
+        field.
+      required: [amount_cents, currency]
+      properties:
+        amount_cents: { $ref: '#/components/schemas/Cents' }
+        currency: { type: string, const: KES, default: KES }
+
+    Totals:
+      type: object
+      description: |
+        Always satisfies `total_cents = subtotal_cents + delivery_fee_cents - discount_cents`,
+        which is the `totals_reconcile` database constraint expressed in the wire format: a
+        response whose arithmetic does not close is a bug that can be detected by a contract
+        test rather than discovered by a customer.
+      required: [subtotal_cents, delivery_fee_cents, discount_cents, total_cents, currency]
+      properties:
+        subtotal_cents: { $ref: '#/components/schemas/Cents' }
+        delivery_fee_cents: { $ref: '#/components/schemas/Cents' }
+        discount_cents: { $ref: '#/components/schemas/Cents' }
+        total_cents: { $ref: '#/components/schemas/Cents' }
+        currency: { type: string, const: KES }
+
+    Pagination:
+      type: object
+      required: [page, page_size, total, total_pages]
+      properties:
+        page: { type: integer, minimum: 1 }
+        page_size: { type: integer, minimum: 1, maximum: 100 }
+        total: { type: integer, format: int64, minimum: 0 }
+        total_pages: { type: integer, minimum: 0 }
+
+    Error:
+      type: object
+      description: |
+        The one error shape every failure uses. `code` is a stable machine-readable SCREAMING
+        identifier the client switches on; `message` is safe to show a human and is never used
+        for programmatic decisions.
+      required: [code, message, correlation_id]
+      properties:
+        code:
+          type: string
+          pattern: '^[A-Z][A-Z0-9_]*$'
+          description: |
+            Stable contract-level identifier. Known values across this increment:
+            `VALIDATION_FAILED`, `PERMISSION_DENIED`, `NOT_FOUND`, `STOCK_INSUFFICIENT`,
+            `QUOTE_STALE`, `TRANSITION_NOT_ALLOWED`, `OVERRIDE_REASON_REQUIRED`,
+            `METHOD_CONFLICT`, `IDEMPOTENCY_KEY_CONFLICT`, `PRICE_CHANGE_NOT_ALLOWED`,
+            `PRODUCT_HAS_ORDER_HISTORY`, `PAYMENT_ALREADY_SETTLED`, `RATE_LIMITED`,
+            `PROVIDER_UNAVAILABLE`, `INTERNAL_ERROR`.
+        message: { type: string }
+        details:
+          type: array
+          description: Field-level or entity-level specifics; empty for opaque failures.
+          items:
+            type: object
+            properties:
+              field: { type: string, description: JSON pointer or field name. }
+              issue: { type: string }
+              product_id: { type: integer, format: int64, description: For STOCK_INSUFFICIENT. }
+              requested: { type: integer }
+              available: { type: integer }
+        correlation_id:
+          type: string
+          description: Matches the structured log entry; the way to debug a production failure without exposing internals.
+
+    ValidationError:
+      allOf:
+        - $ref: '#/components/schemas/Error'
+        - type: object
+          properties:
+            code: { type: string, const: VALIDATION_FAILED }
+
+    PermissionError:
+      allOf:
+        - $ref: '#/components/schemas/Error'
+        - type: object
+          properties:
+            code: { type: string, const: PERMISSION_DENIED }
+            missing_permission:
+              type: string
+              description: The permission key whose absence denied the request.
+
+    AuditReceipt:
+      type: object
+      description: Returned by privileged writes so the actor sees that the change was recorded.
+      required: [audit_log_id, occurred_at]
+      properties:
+        audit_log_id: { type: integer, format: int64 }
+        occurred_at: { $ref: '#/components/schemas/Timestamp' }
+        previous_value: {}
+        new_value: {}
+        reason: { type: string }
+
+    # ── Authentication ───────────────────────────────────────────────────
+    RegisterRequest:
+      type: object
+      required: [full_name, email, phone, password]
+      properties:
+        full_name: { type: string, minLength: 2, maxLength: 120 }
+        email: { type: string, format: email }
+        phone: { type: string, pattern: '^(?:\+254|0)[17]\d{8}$', description: Kenyan MSISDN; normalised to +254 on write. }
+        password:
+          type: string
+          format: password
+          minLength: 10
+          maxLength: 200
+          description: |
+            Minimum length 10, checked against a breached-password list; no composition rules
+            that push people towards write-it-on-a-sticky-note behaviour. Hashed with
+            Argon2id; never logged, never echoed, never returned.
+
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string, format: password }
+
+    ChangePasswordRequest:
+      type: object
+      required: [current_password, new_password]
+      properties:
+        current_password: { type: string, format: password }
+        new_password:
+          type: string
+          format: password
+          minLength: 10
+          maxLength: 200
+          description: Same policy as registration, and must differ from the current password.
+
+    Session:
+      type: object
+      description: The principal as the backend sees it.
+      required: [user, permissions, csrf_token]
+      properties:
+        user:
+          type: object
+          required: [id, full_name, email, account_kind]
+          properties:
+            id: { type: integer, format: int64 }
+            full_name: { type: string }
+            email: { type: string, format: email }
+            phone: { type: [string, 'null'] }
+            account_kind: { type: string, enum: [customer, admin] }
+            email_verified_at: { type: [string, 'null'], format: date-time }
+            phone_verified_at: { type: [string, 'null'], format: date-time }
+        roles:
+          type: array
+          items: { type: string, description: 'Role key, e.g. admin_2_operations.' }
+        permissions:
+          type: array
+          description: |
+            Effective permission keys — role grants unioned with unexpired exceptional
+            grants. UX input only; each operation is authorised from its own `x-permissions`.
+          items: { type: string }
+        scoped_permissions:
+          type: array
+          description: Keys the backend evaluates against ownership (`[own]`).
+          items: { type: string }
+        csrf_token: { type: string }
+        expires_at: { $ref: '#/components/schemas/Timestamp' }
+
+    # ── Catalogue ────────────────────────────────────────────────────────
+    StockAvailability:
+      type: string
+      description: |
+        **Derived** from `available_quantity` and the product's own thresholds — a response
+        label, not a stored status. This is what separates the conflated single `status` field
+        in the current model: visibility is `publication_state`, stock truth is
+        `available_quantity`, and this is a rendering of the second.
+      enum: [in_stock, low_stock, out_of_stock]
+
+    Category:
+      type: object
+      required: [id, name, slug]
+      properties:
+        id: { type: integer, format: int64 }
+        name: { type: string }
+        slug: { type: string }
+        icon: { type: [string, 'null'], description: Emoji glyph, as today. }
+        parent_id: { type: [integer, 'null'], format: int64 }
+        product_count:
+          type: integer
+          description: Computed over published products at read time; never stored.
+
+    CategoryList:
+      type: object
+      required: [data, meta]
+      properties:
+        data: { type: array, items: { $ref: '#/components/schemas/Category' } }
+        meta: { $ref: '#/components/schemas/Pagination' }
+
+    ProductImage:
+      type: object
+      required: [url]
+      properties:
+        url: { type: string, format: uri }
+        alt_text: { type: [string, 'null'] }
+        position: { type: integer, minimum: 0 }
+        is_primary: { type: boolean }
+
+    ProductSummary:
+      type: object
+      description: Storefront card shape.
+      required: [id, sku, name, slug, price_cents, availability, publication_state]
+      properties:
+        id: { type: integer, format: int64 }
+        sku: { type: string }
+        name: { type: string }
+        slug: { type: string }
+        brand: { type: [string, 'null'] }
+        category: { $ref: '#/components/schemas/Category' }
+        price_cents: { $ref: '#/components/schemas/Cents' }
+        compare_at_price_cents: { type: [integer, 'null'], description: Replaces the "original price" the current ProductCard invented. }
+        currency: { type: string, const: KES }
+        image_url: { type: [string, 'null'], description: Primary image. }
+        available_quantity: { type: integer, description: Live, not a label — on_hand minus reserved. }
+        availability: { $ref: '#/components/schemas/StockAvailability' }
+        publication_state: { $ref: '#/components/schemas/PublicationState' }
+        is_featured: { type: boolean }
+        rating_avg: { type: number, minimum: 0, maximum: 5, description: Derived from approved reviews, NUMERIC(3,2). Replaces the `.toFixed(1)` string written into a Number field at index.js:436. }
+        rating_count: { type: integer, minimum: 0 }
+
+    PublicationState:
+      type: string
+      description: Storefront visibility, independent of stock.
+      enum: [draft, published, unpublished, archived]
+
+    ProductDetail:
+      allOf:
+        - $ref: '#/components/schemas/ProductSummary'
+        - type: object
+          properties:
+            description: { type: [string, 'null'] }
+            subcategory: { type: [string, 'null'] }
+            images: { type: array, items: { $ref: '#/components/schemas/ProductImage' } }
+            specifications:
+              type: object
+              additionalProperties: true
+              description: JSONB, for genuinely variable product specs only (§9) — never a whole entity in a blob.
+            low_stock_threshold: { type: integer }
+            critical_stock_threshold: { type: integer }
+            views: { type: integer, description: Eventually consistent counter (T-09). }
+            created_at: { $ref: '#/components/schemas/Timestamp' }
+            updated_at: { $ref: '#/components/schemas/Timestamp' }
+            published_at: { type: [string, 'null'], format: date-time }
+            archived_at: { type: [string, 'null'], format: date-time }
+
+    ProductList:
+      type: object
+      required: [data, meta]
+      properties:
+        data: { type: array, items: { $ref: '#/components/schemas/ProductSummary' } }
+        meta:
+          allOf:
+            - $ref: '#/components/schemas/Pagination'
+            - type: object
+              properties:
+                applied_filters: { type: object, additionalProperties: true }
+
+    ProductCreateRequest:
+      type: object
+      required: [sku, name, price_cents, category_id]
+      properties:
+        sku: { type: string, minLength: 1, maxLength: 64, description: Unique case-insensitively. }
+        name: { type: string, minLength: 2, maxLength: 200 }
+        slug: { type: string, pattern: '^[a-z0-9]+(?:-[a-z0-9]+)*$', description: Generated from name when omitted. }
+        description: { type: string, maxLength: 20000 }
+        brand: { type: string }
+        price_cents:
+          allOf:
+            - $ref: '#/components/schemas/Cents'
+            - description: 'Whole shillings only: `price_cents % 100 = 0` (ADR-021 candidate). This is what makes the Daraja amount and the order total identical rather than approximately equal.'
+          examples: [120000]
+        compare_at_price_cents: { type: integer }
+        category_id: { type: integer, format: int64 }
+        subcategory: { type: string }
+        is_featured: { type: boolean, default: false }
+        images: { type: array, items: { $ref: '#/components/schemas/ProductImage' } }
+        specifications: { type: object, additionalProperties: true }
+
+    ProductUpdateRequest:
+      type: object
+      description: Partial update. **`price_cents` must not appear** — see the operation description.
+      minProperties: 1
+      properties:
+        name: { type: string }
+        description: { type: string }
+        brand: { type: string }
+        category_id: { type: integer, format: int64 }
+        subcategory: { type: string }
+        is_featured: { type: boolean }
+        images: { type: array, items: { $ref: '#/components/schemas/ProductImage' } }
+        specifications: { type: object, additionalProperties: true }
+      additionalProperties: false
+
+    PriceChangeRequest:
+      type: object
+      description: |
+        The reason field is not optional decoration. §10 requires price changes to be audited
+        and ADR-016 grants Admin 2 pricing latitude in exchange for that record — the request
+        schema is where that trade is actually collected.
+      required: [price_cents, reason]
+      properties:
+        price_cents:
+          allOf:
+            - $ref: '#/components/schemas/Cents'
+            - description: Whole shillings; `price_cents % 100 = 0`.
+        compare_at_price_cents: { type: integer }
+        effective_from: { $ref: '#/components/schemas/Timestamp' }
+        reason:
+          type: string
+          minLength: 8
+          maxLength: 500
+          description: Required, mandatory in the audit record, surfaced in the admin change log.
+      additionalProperties: false
+
+    PublicationRequest:
+      type: object
+      required: [publication_state]
+      properties:
+        publication_state: { $ref: '#/components/schemas/PublicationState' }
+        reason: { type: string, description: Required when leaving `published`. }
+      additionalProperties: false
+
+    # ── Cart ─────────────────────────────────────────────────────────────
+    CartItem:
+      type: object
+      required: [product_id, quantity, unit_price_cents, line_total_cents]
+      properties:
+        product_id: { type: integer, format: int64 }
+        sku: { type: string }
+        name: { type: string }
+        image_url: { type: [string, 'null'] }
+        quantity: { type: integer, minimum: 1, maximum: 999 }
+        unit_price_cents:
+          type: integer
+          description: |
+            **Current catalogue price**, recomputed on read — not the price the item was added
+            at. `cart_items.price_snapshot_cents` records the add-time price for display of a
+            change, but it is never what is charged.
+        added_at_price_cents: { type: integer, description: Snapshot at add time, for the "price changed" notice only. }
+        line_total_cents: { type: integer, description: 'unit_price_cents × quantity, exactly.' }
+        available_quantity: { type: integer }
+        availability: { $ref: '#/components/schemas/StockAvailability' }
+
+    CartLineIssue:
+      type: object
+      description: |
+        Why a line is currently unbuyable or has changed. The client must show these before
+        offering checkout — the alternative is a customer discovering the problem at the
+        payment prompt.
+      required: [product_id, code]
+      properties:
+        product_id: { type: integer, format: int64 }
+        code:
+          type: string
+          enum: [PRICE_INCREASED, PRICE_DECREASED, OUT_OF_STOCK, PARTIAL_STOCK, UNPUBLISHED, ARCHIVED]
+        from_cents: { type: integer }
+        to_cents: { type: integer }
+        available_quantity: { type: integer }
+
+    Cart:
+      type: object
+      required: [id, is_guest, items, totals, line_issues]
+      properties:
+        id: { type: integer, format: int64 }
+        is_guest: { type: boolean, description: 'False once bound to a session; a guest cart still needs an account to check out (ordering.orders.create is Customer-only).' }
+        items: { type: array, items: { $ref: '#/components/schemas/CartItem' } }
+        totals:
+          allOf:
+            - $ref: '#/components/schemas/Totals'
+            - description: 'Indicative, delivery fee not yet resolved to a zone: `delivery_fee_cents` is 0 here and is only computed in the quote. Never authoritative.'
+        line_issues: { type: array, items: { $ref: '#/components/schemas/CartLineIssue' } }
+        updated_at: { $ref: '#/components/schemas/Timestamp' }
+
+    CartItemAddRequest:
+      type: object
+      required: [product_id, quantity]
+      properties:
+        product_id: { type: integer, format: int64 }
+        quantity: { type: integer, minimum: 1, maximum: 999 }
+      additionalProperties: false
+
+    CartItemUpdateRequest:
+      type: object
+      required: [quantity]
+      properties:
+        quantity: { type: integer, minimum: 1, maximum: 999 }
+      additionalProperties: false
+
+    # ── Checkout and Orders ──────────────────────────────────────────────
+    QuoteRequest:
+      type: object
+      description: |
+        Customer intent only. Any `total`, `subtotal`, `price`, `discount`, `delivery_fee` or
+        `payment_status` in a request body is outside this schema and rejected — which is how
+        `POST /orders` reading `total_amount` out of the body (`index.js:273`) becomes
+        impossible rather than merely discouraged.
+      required: [fulfilment_method, contact_name, contact_phone]
+      properties:
+        fulfilment_method: { $ref: '#/components/schemas/FulfilmentMethod' }
+        contact_name: { type: string, minLength: 2, maxLength: 120 }
+        contact_phone: { type: string, pattern: '^(?:\+254|0)[17]\d{8}$' }
+        contact_email: { type: string, format: email }
+        delivery:
+          type: object
+          description: Required when `fulfilment_method = delivery`.
+          required: [zone_id, address_line]
+          properties:
+            zone_id: { type: integer, format: int64 }
+            address_line: { type: string, maxLength: 300 }
+            area: { type: string }
+            county: { type: string }
+            landmark: { type: string }
+        pickup_window_id: { type: integer, format: int64, description: Required when `fulfilment_method = pickup`; validated against server-side `store_hours` in `Africa/Nairobi` (ADR-018), never the browser clock. }
+        notes: { type: string, maxLength: 2000 }
+        coupon_code: { type: string, description: 'Reserved. Promotions precedence is undecided (§18); accepted and ignored until that context is specified rather than guessed at.' }
+
+    Quote:
+      type: object
+      description: |
+        A priced cart frozen for a short window (T-01's input). Placing an order against a
+        stale quote is a 409 `QUOTE_STALE`, not a silent re-price.
+      required: [id, totals, lines, expires_at, fulfilment_method]
+      properties:
+        id: { type: integer, format: int64 }
+        fulfilment_method: { $ref: '#/components/schemas/FulfilmentMethod' }
+        lines:
+          type: array
+          items:
+            type: object
+            required: [product_id, name, sku, unit_price_cents, quantity, line_total_cents]
+            properties:
+              product_id: { type: integer, format: int64 }
+              name: { type: string }
+              sku: { type: string }
+              unit_price_cents: { $ref: '#/components/schemas/Cents' }
+              quantity: { type: integer }
+              line_total_cents: { $ref: '#/components/schemas/Cents' }
+        totals:
+          allOf:
+            - $ref: '#/components/schemas/Totals'
+            - description: |
+                `discount_cents` is rounded half-up to the nearest whole shilling **once,
+                here**, and snapshotted onto the line (§2) — so the figure charged equals the
+                figure sent to Daraja with no rounding step left to the provider.
+        delivery_zone:
+          type: [object, 'null']
+          properties:
+            id: { type: integer, format: int64 }
+            name: { type: string }
+            fee_cents: { $ref: '#/components/schemas/Cents' }
+            lead_time_hours: { type: integer }
+        store_window:
+          type: [object, 'null']
+          description: Server-evaluated opening hours for the chosen method.
+          properties:
+            is_open: { type: boolean }
+            next_open_at: { $ref: '#/components/schemas/Timestamp' }
+            same_day_cutoff: { type: [string, 'null'] }
+        expires_at: { $ref: '#/components/schemas/Timestamp' }
+        pricing_changed:
+          type: boolean
+          description: True when the quote differs from the cart the client last saw; the UI must re-confirm before placing.
+
+    PlaceOrderRequest:
+      type: object
+      required: [quote_id]
+      properties:
+        quote_id: { type: integer, format: int64 }
+        notes: { type: string, maxLength: 2000 }
+        accept_price_change:
+          type: boolean
+          description: |
+            Must be true if the quote carried `pricing_changed`. This is the schema-level
+            statement that a shopper confirms a new price rather than being re-priced at
+            submission.
+      additionalProperties: false
+
+    OrderLine:
+      type: object
+      description: |
+        An immutable snapshot. `product_name` and `sku` are copied at placement so an order
+        stays readable after the product is renamed, repriced (ADR-016) or archived — and
+        `line_total_cents = unit_price_cents × quantity` is a database CHECK, not arithmetic
+        the client performs.
+      required: [product_id, product_name, sku, unit_price_cents, quantity, line_total_cents]
+      properties:
+        product_id: { type: integer, format: int64 }
+        product_name: { type: string }
+        sku: { type: string }
+        unit_price_cents: { $ref: '#/components/schemas/Cents' }
+        quantity: { type: integer, minimum: 1 }
+        line_total_cents: { $ref: '#/components/schemas/Cents' }
+
+    OrderSummary:
+      type: object
+      required: [reference, status, payment_status, totals, placed_at]
+      properties:
+        reference: { type: string, pattern: '^NJ-[0-9]{4}-[0-9]+$' }
+        status: { $ref: '#/components/schemas/OrderStatus' }
+        payment_status: { $ref: '#/components/schemas/PaymentStatus' }
+        fulfilment_method: { $ref: '#/components/schemas/FulfilmentMethod' }
+        totals: { $ref: '#/components/schemas/Totals' }
+        line_count: { type: integer }
+        customer_name: { type: string }
+        customer_phone:
+          { type: string, description: Masked for `read` without `read.all` — data minimisation per role (§10). }
+        placed_at: { $ref: '#/components/schemas/Timestamp' }
+        expires_at:
+          { type: [string, 'null'], format: date-time, description: 'Payment window; after this the expiry job (T-05) moves the order to `expired` and releases stock.' }
+
+    OrderDetail:
+      allOf:
+        - $ref: '#/components/schemas/OrderSummary'
+        - type: object
+          properties:
+            id: { type: integer, format: int64 }
+            customer_id: { type: [integer, 'null'], format: int64 }
+            customer_email: { type: [string, 'null'], format: email }
+            lines: { type: array, items: { $ref: '#/components/schemas/OrderLine' } }
+            delivery:
+              type: [object, 'null']
+              description: Present when `fulfilment_method = delivery`. Full fulfilment endpoints are a later increment.
+              properties:
+                status: { type: string }
+                zone_name: { type: [string, 'null'] }
+                address_line: { type: [string, 'null'] }
+                fee_charged_cents: { $ref: '#/components/schemas/Cents' }
+                promised_window_start: { type: [string, 'null'], format: date-time }
+                promised_window_end: { type: [string, 'null'], format: date-time }
+            pickup:
+              type: [object, 'null']
+              properties:
+                status: { type: string }
+                window_start: { type: [string, 'null'], format: date-time }
+                window_end: { type: [string, 'null'], format: date-time }
+                collected_at: { type: [string, 'null'], format: date-time }
+            notes: { type: [string, 'null'] }
+            cancel_reason: { type: [string, 'null'] }
+            status_history: { type: array, items: { $ref: '#/components/schemas/StatusEvent' } }
+            payment: { $ref: '#/components/schemas/PaymentSummary' }
+            created_at: { $ref: '#/components/schemas/Timestamp' }
+            updated_at: { $ref: '#/components/schemas/Timestamp' }
+
+    OrderList:
+      type: object
+      required: [data, meta]
+      properties:
+        data: { type: array, items: { $ref: '#/components/schemas/OrderSummary' } }
+        meta: { $ref: '#/components/schemas/Pagination' }
+
+    StatusEvent:
+      type: object
+      description: Append-only `order_status_history` row. There is no endpoint that edits one.
+      required: [to_status, occurred_at]
+      properties:
+        from_status: { type: [string, 'null'] }
+        to_status: { type: string }
+        actor:
+          type: [object, 'null']
+          description: Null for a system-driven transition.
+          properties:
+            id: { type: integer, format: int64 }
+            name: { type: string }
+        system_trigger:
+          { type: [string, 'null'], enum: ['daraja_callback', 'reservation_expiry', 'reconciliation', null], description: Which automated path caused the move. }
+        reason: { type: [string, 'null'], description: 'Mandatory for a non-adjacent transition (B16).' }
+        occurred_at: { $ref: '#/components/schemas/Timestamp' }
+
+    CancelRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason: { type: string, minLength: 3, maxLength: 500 }
+      additionalProperties: false
+
+    OrderTransitionRequest:
+      type: object
+      description: |
+        `to_status` is validated against the ADR-015 adjacency table for the order's current
+        status **and** its `fulfilment_method`. There is no free-text status field.
+      required: [to_status]
+      properties:
+        to_status: { $ref: '#/components/schemas/OrderStatus' }
+        reason:
+          type: string
+          maxLength: 500
+          description: |
+            Required whenever the move is non-adjacent — i.e. whenever
+            `ordering.orders.status.override` was needed. Enforced by the
+            `override_needs_reason` database constraint, so an override without a reason is
+            not a state the schema can be in.
+      additionalProperties: false
+
+    TrackRequest:
+      type: object
+      description: |
+        The two factors are checked together; a correct reference with a wrong phone is
+        indistinguishable from a wrong reference.
+      required: [reference, phone]
+      properties:
+        reference: { type: string, pattern: '^NJ-[0-9]{4}-[0-9]+$' }
+        phone: { type: string, pattern: '^(?:\+254|0)[17]\d{8}$' }
+      additionalProperties: false
+
+    OrderTracking:
+      type: object
+      description: |
+        The projection matrix G3 asks for — enough to tell a customer where their order is,
+        nothing that would matter to someone who stole the reference. No line items, no
+        prices, no email, no full address, no payment records.
+      required: [reference, status, placed_at]
+      properties:
+        reference: { type: string }
+        status: { $ref: '#/components/schemas/OrderStatus' }
+        payment_status:
+          { $ref: '#/components/schemas/PaymentStatus', description: 'Coarse only: enough to say "awaiting payment". A `paid` state is safe to show because only the callback can produce it.' }
+        fulfilment_method: { $ref: '#/components/schemas/FulfilmentMethod' }
+        placed_at: { $ref: '#/components/schemas/Timestamp' }
+        expected_window:
+          type: [object, 'null']
+          properties:
+            start: { type: [string, 'null'], format: date-time }
+            end: { type: [string, 'null'], format: date-time }
+        timeline:
+          type: array
+          description: Status and date only — no actor, no reason text.
+          items:
+            type: object
+            properties:
+              status: { type: string }
+              occurred_at: { $ref: '#/components/schemas/Timestamp' }
+
+    StockConflict:
+      allOf:
+        - $ref: '#/components/schemas/Error'
+        - type: object
+          properties:
+            code: { type: string, enum: [STOCK_INSUFFICIENT, QUOTE_STALE, IDEMPOTENCY_KEY_CONFLICT] }
+            insufficient:
+              type: array
+              description: For `STOCK_INSUFFICIENT` — exactly which products, and by how much.
+              items:
+                type: object
+                properties:
+                  product_id: { type: integer, format: int64 }
+                  name: { type: string }
+                  requested: { type: integer }
+                  available: { type: integer }
+            stale_lines:
+              type: array
+              description: For `QUOTE_STALE` — the re-priced lines to confirm.
+              items: { $ref: '#/components/schemas/CartLineIssue' }
+
+    TransitionConflict:
+      allOf:
+        - $ref: '#/components/schemas/Error'
+        - type: object
+          properties:
+            code:
+              { type: string, enum: [TRANSITION_NOT_ALLOWED, OVERRIDE_REASON_REQUIRED, METHOD_CONFLICT, PAYMENT_ALREADY_SETTLED, ORDER_NOT_PAYABLE] }
+            current_status: { $ref: '#/components/schemas/OrderStatus' }
+            allowed_next:
+              type: array
+              description: |
+                The states this order can actually move to right now. Returning them makes
+                the admin UI correct by construction instead of by hardcoding a state table
+                that drifts from the backend's.
+              items: { $ref: '#/components/schemas/OrderStatus' }
+
+    ProviderError:
+      allOf:
+        - $ref: '#/components/schemas/Error'
+        - type: object
+          properties:
+            code: { type: string, const: PROVIDER_UNAVAILABLE }
+            provider: { type: string, enum: [daraja, cloudinary, smtp] }
+            provider_detail:
+              type: [object, 'null']
+              description: The upstream result code and message verbatim, for support; never a credential.
+              properties:
+                result_code: { type: [string, 'null'] }
+                result_desc: { type: [string, 'null'] }
+
+    # ── Payments ─────────────────────────────────────────────────────────
+    PaymentSummary:
+      type: object
+      description: The payment view embedded in an order.
+      required: [status, amount_owed_cents]
+      properties:
+        id: { type: integer, format: int64 }
+        status: { $ref: '#/components/schemas/PaymentStatus' }
+        amount_owed_cents: { $ref: '#/components/schemas/Cents' }
+        amount_paid_cents: { type: [integer, 'null'], description: 'Populated only from a verified provider transaction.' }
+        settled_at: { type: [string, 'null'], format: date-time }
+        reconciliation_required:
+          { type: boolean, description: 'True when money moved in an unexpected amount or against an unknown order — the state the current code hides by marking a mismatch `paid`.' }
+
+    Payment:
+      allOf:
+        - $ref: '#/components/schemas/PaymentSummary'
+        - type: object
+          properties:
+            order_reference: { type: string }
+            attempts: { type: array, items: { $ref: '#/components/schemas/PaymentAttempt' } }
+            transactions: { type: array, items: { $ref: '#/components/schemas/PaymentTransaction' } }
+            refunds: { type: array, items: { $ref: '#/components/schemas/Refund' } }
+
+    StkPushRequest:
+      type: object
+      description: |
+        Phone number only. No amount, no order total, no callback url. Daraja credentials live
+        in server configuration and are absent from every response in this contract (§11).
+      required: [phone]
+      properties:
+        phone:
+          type: string
+          pattern: '^(?:\+254|0)[17]\d{8}$'
+          description: Normalised to `2547XXXXXXXX` for Daraja on write.
+        description: { type: string, maxLength: 100, description: 'Shown on the handset, e.g. "Naoja NJ-2026-417".' }
+      additionalProperties: false
+
+    PaymentAttempt:
+      type: object
+      description: |
+        One STK Push request. An attempt is **not** a settlement — `succeeded` here means
+        Daraja accepted the request, which is why the client still has to read the payment
+        resource.
+      required: [id, status, amount_requested_cents, phone]
+      properties:
+        id: { type: integer, format: int64 }
+        provider: { type: string, const: daraja }
+        merchant_request_id:
+          { type: [string, 'null'], description: 'CheckoutRequestID — the anchor a callback is matched against. The only key used for matching.' }
+        phone: { type: string }
+        amount_requested_cents:
+          { $ref: '#/components/schemas/Cents', description: 'Copied from `payments.amount_owed_cents` server-side; `% 100 = 0` because prices are whole shillings.' }
+        status:
+          type: string
+          enum: [initiated, pending, succeeded, failed, unknown]
+        result_code: { type: [string, 'null'] }
+        result_desc: { type: [string, 'null'] }
+        created_at: { $ref: '#/components/schemas/Timestamp' }
+        updated_at: { $ref: '#/components/schemas/Timestamp' }
+
+    PaymentTransaction:
+      type: object
+      description: |
+        One verified provider transaction. `provider_transaction_id` (MpesaReceiptNumber) is
+        unique — that constraint is what turns a replayed callback from a second settlement
+        into a no-op.
+      required: [provider_transaction_id, amount_paid_cents, received_at]
+      properties:
+        id: { type: integer, format: int64 }
+        provider_transaction_id: { type: string }
+        attempt_id: { type: integer, format: int64 }
+        amount_paid_cents: { $ref: '#/components/schemas/Cents' }
+        result_code: { type: string }
+        result_desc: { type: [string, 'null'] }
+        phone: { type: [string, 'null'] }
+        received_at: { $ref: '#/components/schemas/Timestamp' }
+        source_verified: { type: boolean }
+        verified_at: { type: [string, 'null'], format: date-time }
+
+    DarajaCallbackPayload:
+      type: object
+      description: |
+        Safaricom's own envelope, `Body.stkCallback`. Accepted as-is because we do not control
+        it, and stored raw in `payment_transactions.raw_payload` (§9 — JSONB for a provider
+        payload is exactly the selective use it allows). Nothing in this schema is trusted for
+        an amount until it has been verified, correlated and checked against
+        `amount_owed_cents`.
+      properties:
+        Body:
+          type: object
+          properties:
+            stkCallback:
+              type: object
+              properties:
+                MerchantRequestID: { type: string }
+                CheckoutRequestID: { type: string }
+                ResultCode: { type: integer }
+                ResultDesc: { type: string }
+                CallbackMetadata:
+                  type: object
+                  properties:
+                    Item:
+                      type: array
+                      items:
+                        type: object
+                        properties:
+                          Name: { type: string }
+                          Value: {}
+              required: [CheckoutRequestID, ResultCode]
+
+    DarajaCallbackAck:
+      type: object
+      description: |
+        The acknowledgement Safaricom expects. Shape is dictated by the provider, not by our
+        error convention, which is the one place in this contract where that exception is
+        allowed.
+      required: [ResultCode, ResultDesc]
+      properties:
+        ResultCode: { type: integer, const: 0 }
+        ResultDesc: { type: string, examples: ['Accepted'] }
+
+    PaymentOverrideRequest:
+      type: object
+      required: [to_status, reason]
+      properties:
+        to_status:
+          type: string
+          enum: [failed, expired, refunded, paid]
+          description: |
+            `paid` requires evidence in `evidence_reference` and an amount that matches
+            exactly — an override cannot manufacture a settlement the amount constraint
+            refuses.
+        reason: { type: string, minLength: 10, maxLength: 500 }
+        evidence_reference:
+          { type: [string, 'null'], maxLength: 200, description: 'Where the proof lives (till statement line, receipt screenshot ref). Mandatory for `to_status = paid`.' }
+      additionalProperties: false
+
+    ReconciliationResult:
+      type: object
+      required: [payment_id, outcome]
+      properties:
+        payment_id: { type: integer, format: int64 }
+        outcome:
+          type: string
+          enum: [settled, already_settled, amount_mismatch, no_provider_record, order_unresolved, provider_error]
+        applied_transaction: { $ref: '#/components/schemas/PaymentTransaction' }
+        message: { type: string }
+        audited_at: { $ref: '#/components/schemas/Timestamp' }
+
+    RefundRequest:
+      type: object
+      required: [amount_cents, reason]
+      properties:
+        amount_cents:
+          { $ref: '#/components/schemas/Cents', description: 'Must not exceed `payments.amount_paid_cents`. The bound crosses tables so it cannot be a CHECK constraint; it is enforced in the use case inside the transaction and covered by a test.' }
+        reason: { type: string, minLength: 10, maxLength: 500 }
+        order_line_ids:
+          type: array
+          description: Which lines are being refunded — the reason `order_lines` exists as rows rather than a JSONB blob.
+          items: { type: integer, format: int64 }
+      additionalProperties: false
+
+    Refund:
+      type: object
+      required: [id, status, amount_cents, reason, requested_by]
+      properties:
+        id: { type: integer, format: int64 }
+        payment_id: { type: integer, format: int64 }
+        order_reference: { type: string }
+        amount_cents: { $ref: '#/components/schemas/Cents' }
+        reason: { type: string }
+        status: { type: string, enum: [requested, approved, executed, rejected] }
+        requested_by:
+          type: object
+          properties:
+            id: { type: integer, format: int64 }
+            name: { type: string }
+        approved_by: { type: [object, 'null'], properties: { id: { type: integer, format: int64 }, name: { type: string } } }
+        approved_at: { type: [string, 'null'], format: date-time }
+        rejected_reason: { type: [string, 'null'] }
+        provider_reference:
+          { type: [string, 'null'], description: 'The proof the money actually moved (ADR-020). Absent until execution.' }
+        executed_at: { type: [string, 'null'], format: date-time }
+        created_at: { $ref: '#/components/schemas/Timestamp' }
+
+    RefundDecisionRequest:
+      type: object
+      required: [decision]
+      properties:
+        decision: { type: string, enum: [approve, reject] }
+        reason:
+          { type: string, maxLength: 500, description: 'Required when rejecting.' }
+      additionalProperties: false
+
+    RefundExecutionRequest:
+      type: object
+      required: [provider_reference, executed_at]
+      properties:
+        provider_reference:
+          { type: string, minLength: 3, maxLength: 200, description: 'M-Pesa reversal id, bank transfer reference or manual-payment note. Required: an executed refund with no reference is an unaudited cash movement.' }
+        executed_at: { $ref: '#/components/schemas/Timestamp' }
+        note: { type: string, maxLength: 500 }
+      additionalProperties: false

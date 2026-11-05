@@ -469,7 +469,10 @@ This matrix feeds directly into §19 step 3 (domain model and ERD). It requires 
   per-attempt idempotency that a single `payment_status` column on `orders` cannot express.
 
 And into §19 step 4 (OpenAPI): every protected operation needs its permission declared in
-the contract, and 403 responses with a consistent error shape.
+the contract, and 403 responses with a consistent error shape. Both are satisfied in
+`contracts/openapi.yaml` — each operation carries `x-permissions` naming the keys above,
+`x-scoped: own` marks the ownership-scoped ones, and the shared `Error`/`PermissionError`
+shape is the single error contract for every failure.
 
 ---
 
