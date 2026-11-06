@@ -76,7 +76,7 @@ export default function FulfillmentModule({
             <>
               <p className="text-xs text-gray-500 mt-2">{deliveryMsg}</p>
               <p className="text-xs text-gray-500 mt-2">
-                Delivery: <strong>Sunday-Friday</strong>, <strong>8:30am-4:00pm</strong>. Closed <strong>Saturday</strong>.
+                Delivery is available <strong>Sunday-Friday</strong>. No deliveries are made on <strong>Saturday</strong>.
               </p>
               <Link
                 to="/account?tab=policy"
@@ -97,7 +97,7 @@ export default function FulfillmentModule({
           </p>
           <p className="text-xs text-gray-500 mt-2">{pickupMsg}</p>
           <p className="text-xs text-gray-500 mt-2">
-            Shop hours: <strong>Sun-Thu 8:30am-8:00pm</strong> - <strong>Fri 8:30am-3:00pm</strong>. Closed <strong>Saturday</strong>.
+            Online orders are accepted <strong>24/7</strong>. Pickup is available <strong>daily</strong>.
           </p>
           <Link
             to="/account?tab=location"

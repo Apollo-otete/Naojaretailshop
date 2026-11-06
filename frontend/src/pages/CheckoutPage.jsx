@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { CheckCircle, ChevronRight, Truck, Store, MapPin, Copy, Check, Smartphone, Loader, AlertCircle } from 'lucide-react';
 import Layout from '../components/Layout';
+import SEO from '../components/SEO';
 import { useCart } from '../lib/cart';
 import { api } from '../lib/api';
 import { getDeliveryFee, isFreeDelivery, STORE_LOCATION } from '../lib/fulfillment';
@@ -198,6 +199,7 @@ export default function CheckoutPage() {
     const isPaid = paymentSuccess || confirmedOrder.payment_status === 'paid';
     return (
       <Layout>
+        <SEO title="Order Confirmed" description="Your order has been received by Naoja Ventures." noindex />
         <div className="max-w-2xl mx-auto px-4 py-16 text-center">
           <div className="inline-flex items-center justify-center w-20 h-20 bg-green-100 rounded-full mb-5">
             <CheckCircle className="w-12 h-12 text-green-600" />
@@ -276,6 +278,7 @@ export default function CheckoutPage() {
   // ─── CHECKOUT STEP FORM ───────────────────────────────────────────────────
   return (
     <Layout>
+      <SEO title="Checkout" description="Complete your Naoja Ventures order with secure M-Pesa checkout and delivery or store pickup." noindex />
       <div className="max-w-7xl mx-auto px-4 py-6">
         {/* Breadcrumb */}
         <div className="text-xs text-gray-500 pb-4">
@@ -366,8 +369,8 @@ export default function CheckoutPage() {
 
                 <div className="grid grid-cols-2 gap-4">
                   {[
-                    { type: 'delivery', Icon: Truck, label: 'Delivery', sub: 'Sun–Fri 8:30am–4:00pm' },
-                    { type: 'pickup', Icon: Store, label: 'Pickup', sub: 'Ready in 1–2 hours' },
+                    { type: 'delivery', Icon: Truck, label: 'Delivery', sub: 'Sun–Fri, no Saturday delivery' },
+                    { type: 'pickup', Icon: Store, label: 'Pickup', sub: 'Available daily' },
                   ].map(({ type, Icon, label, sub }) => (
                     <button
                       key={type}
@@ -415,7 +418,7 @@ export default function CheckoutPage() {
                     <MapPin className="w-5 h-5 text-brand-500 mt-0.5 shrink-0" />
                     <div>
                       <p className="text-sm font-bold text-gray-900">{STORE_LOCATION}</p>
-                      <p className="text-xs text-gray-400 mt-1">Hours: Sun–Thu 8:30am–8:00pm · Fri 8:30am–3:00pm · Closed Saturday</p>
+                      <p className="text-xs text-gray-400 mt-1">Online orders are accepted 24/7. Pickup is available daily; we will confirm when your order is ready.</p>
                     </div>
                   </div>
                 )}

@@ -12,8 +12,8 @@ export default function Footer() {
               <Truck className="w-5 h-5 text-brand-400" />
             </div>
             <div>
-              <p className="text-xs font-bold text-white">Same-Day Delivery</p>
-              <p className="text-[10px] text-gray-500">Within Kakamega & Lurambi</p>
+              <p className="text-xs font-bold text-white">Delivery Sunday-Friday</p>
+              <p className="text-[10px] text-gray-500">No Saturday delivery</p>
             </div>
           </div>
           <div className="flex items-center gap-3">
@@ -84,19 +84,19 @@ export default function Footer() {
 
           {/* Business Hours */}
           <div>
-            <h4 className="font-bold text-white text-sm mb-4">Business Hours</h4>
+            <h4 className="font-bold text-white text-sm mb-4">Online Availability</h4>
             <div className="space-y-2 text-xs text-gray-400">
               <div className="flex items-center gap-2">
                 <Clock className="w-3.5 h-3.5 text-brand-400" />
-                <span>Sun – Thu: 8:30 AM – 8:00 PM</span>
+                <span>Online orders: Open 24/7</span>
               </div>
               <div className="flex items-center gap-2">
                 <Clock className="w-3.5 h-3.5 text-brand-400" />
-                <span>Friday: 8:30 AM – 3:00 PM</span>
+                <span>Pickup: Available daily</span>
               </div>
               <div className="flex items-center gap-2">
-                <Clock className="w-3.5 h-3.5 text-red-400" />
-                <span className="text-red-400 font-semibold">Saturday: Closed</span>
+                <Truck className="w-3.5 h-3.5 text-brand-400" />
+                <span>Delivery: Sunday – Friday</span>
               </div>
             </div>
           </div>
