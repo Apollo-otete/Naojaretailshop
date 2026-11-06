@@ -23,6 +23,15 @@ type Config struct {
 	CORS         CORS
 	HTTPTimeouts Timeouts
 
+	// Session and Login are ADR-019's numbers. What the ADR fixes is the *shape* — sliding
+	// expiry under an absolute cap, a shorter idle window for an administrative session than
+	// for a shopper's, and a per-account failure limit beside the per-address one. The values
+	// are deployment terms, so they are environment configuration here rather than constants
+	// in the domain; the defaults below are the shortest ones that still leave a session usable
+	// by a person rather than by a script.
+	Session Session
+	Login   Login
+
 	// SessionCookieName is referenced by the middleware contract even though sessions
 	// themselves land in Phase 3 (ADR-019); it is here so the cookie attributes have one
 	// authoritative source rather than being re-decided per call site.
@@ -46,6 +55,20 @@ type Timeouts struct {
 	Read  time.Duration
 	Write time.Duration
 	Idle  time.Duration
+}
+
+// Session is the idle-window and cap pair ADR-019 describes. Absolute is measured from session
+// creation, not from the last request, which is what keeps "revocable at any time" from becoming
+// "revocable whenever somebody notices".
+type Session struct {
+	Idle      time.Duration
+	AdminIdle time.Duration
+	Absolute  time.Duration
+}
+
+type Login struct {
+	MaxFailures int
+	Lockout     time.Duration
 }
 
 func (c Config) IsProduction() bool { return c.Env == "production" }
@@ -108,6 +131,27 @@ func (c Config) Validate() error {
 		errs = append(errs, errors.New("SESSION_COOKIE_NAME must be set"))
 	}
 
+	// ADR-019's shape, checked rather than assumed: an admin window longer than the customer's
+	// would invert the one security claim the ADR makes about session lifetime, and a cap below
+	// the idle window means every session silently expires at the cap.
+	switch {
+	case c.Session.Idle <= 0:
+		errs = append(errs, fmt.Errorf("SESSION_IDLE must be positive, got %s", c.Session.Idle))
+	case c.Session.AdminIdle <= 0:
+		errs = append(errs, fmt.Errorf("SESSION_ADMIN_IDLE must be positive, got %s", c.Session.AdminIdle))
+	case c.Session.AdminIdle > c.Session.Idle:
+		errs = append(errs, fmt.Errorf("SESSION_ADMIN_IDLE (%s) must not exceed SESSION_IDLE (%s) — an administrative session is the shorter-lived class",
+			c.Session.AdminIdle, c.Session.Idle))
+	case c.Session.Absolute < c.Session.Idle:
+		errs = append(errs, fmt.Errorf("SESSION_ABSOLUTE (%s) cannot be shorter than SESSION_IDLE (%s)", c.Session.Absolute, c.Session.Idle))
+	}
+	if c.Login.MaxFailures < 1 {
+		errs = append(errs, fmt.Errorf("LOGIN_MAX_FAILURES must be at least 1, got %d", c.Login.MaxFailures))
+	}
+	if c.Login.Lockout <= 0 {
+		errs = append(errs, fmt.Errorf("LOGIN_LOCKOUT must be positive, got %s", c.Login.Lockout))
+	}
+
 	return errors.Join(errs...)
 }
 
@@ -155,6 +199,15 @@ func Load() (Config, error) {
 		Read:  envDuration("HTTP_READ_TIMEOUT", 15*time.Second),
 		Write: envDuration("HTTP_WRITE_TIMEOUT", 30*time.Second),
 		Idle:  envDuration("HTTP_IDLE_TIMEOUT", 60*time.Second),
+	}
+	c.Session = Session{
+		Idle:      envDuration("SESSION_IDLE", 30*time.Minute),
+		AdminIdle: envDuration("SESSION_ADMIN_IDLE", 15*time.Minute),
+		Absolute:  envDuration("SESSION_ABSOLUTE", 12*time.Hour),
+	}
+	c.Login = Login{
+		MaxFailures: envInt("LOGIN_MAX_FAILURES", 5),
+		Lockout:     envDuration("LOGIN_LOCKOUT", 15*time.Minute),
 	}
 
 	if c.Database.MinConns > c.Database.MaxConns {

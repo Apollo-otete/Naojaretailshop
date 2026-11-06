@@ -268,8 +268,16 @@ func (s *Store) GrantsFor(ctx context.Context, userID int64) (identity.Grants, e
 	// One query, two paths: the role grants and the exceptional grants that have neither expired
 	// nor been revoked. Expiry is compared against the database clock so that a grant cannot be
 	// live on one machine and expired on another.
-	perms, err := s.queryStrings(ctx, `
-		SELECT DISTINCT p.key
+	//
+	// The conditions array comes back with each key rather than in a second query because the
+	// pair is what the evaluator decides with (ADR-024), and two reads of two tables would let a
+	// permission be granted before its condition was removed, or the other way round.
+	type grant struct {
+		key        string
+		conditions []string
+	}
+	rows, err := s.exec(ctx).Query(ctx, `
+		SELECT p.key, p.conditions
 		FROM identity.permissions p
 		WHERE p.id IN (
 			SELECT rp.permission_id
@@ -286,7 +294,31 @@ func (s *Store) GrantsFor(ctx context.Context, userID int64) (identity.Grants, e
 	if err != nil {
 		return identity.Grants{}, fmt.Errorf("reading permissions: %w", err)
 	}
-	return identity.Grants{Roles: roles, Permissions: perms}, nil
+	defer rows.Close()
+
+	grants := []grant{}
+	for rows.Next() {
+		var g grant
+		if err := rows.Scan(&g.key, &g.conditions); err != nil {
+			return identity.Grants{}, fmt.Errorf("reading permissions: %w", err)
+		}
+		grants = append(grants, g)
+	}
+	if err := rows.Err(); err != nil {
+		return identity.Grants{}, fmt.Errorf("reading permissions: %w", err)
+	}
+
+	perms := make([]string, 0, len(grants))
+	conditions := map[string][]string{}
+	for _, g := range grants {
+		perms = append(perms, g.key)
+		// An empty array is "no second gate", and is left absent so the evaluator's question is
+		// a map lookup rather than a nil-versus-empty distinction it must interpret.
+		if len(g.conditions) > 0 {
+			conditions[g.key] = g.conditions
+		}
+	}
+	return identity.Grants{Roles: roles, Permissions: perms, Conditions: conditions}, nil
 }
 
 func (s *Store) queryStrings(ctx context.Context, query string, args ...any) ([]string, error) {

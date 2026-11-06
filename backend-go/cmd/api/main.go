@@ -17,9 +17,12 @@ import (
 	"syscall"
 	"time"
 
+	auditpg "github.com/Apollo-otete/Naojaretailshop/backend-go/internal/audit/postgres"
 	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/authz"
 	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/config"
 	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/database"
+	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/identity"
+	identitypg "github.com/Apollo-otete/Naojaretailshop/backend-go/internal/identity/postgres"
 	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/observability"
 	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/port"
 	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/server"
@@ -66,20 +69,61 @@ func run() error {
 		return err
 	}
 
+	// The identity adapters are one Store because they are one schema: users, sessions and the
+	// grant tables are read together on every request, and splitting them across types would
+	// only offer two places to get the transaction boundary wrong.
+	identStore, err := identitypg.New(pg.Pool())
+	if err != nil {
+		return fmt.Errorf("identity store: %w", err)
+	}
+	auditWriter, err := auditpg.New(pg.Pool())
+	if err != nil {
+		return fmt.Errorf("audit writer: %w", err)
+	}
+
+	// NewService spends one Argon2id hash here, on purpose: it is the path an unknown email
+	// takes at login, and hashing it now means a timing oracle cannot be configured into
+	// existence later.
+	ident, err := identity.NewService(identity.Deps{
+		Users:    identStore,
+		Sessions: identStore,
+		Grants:   identStore,
+		Tx:       identitypg.NewTx(pg.Pool()),
+		Audit:    auditWriter,
+		Hasher:   identity.NewHasher(),
+		Policy: identity.Policy{
+			Idle:      cfg.Session.Idle,
+			AdminIdle: cfg.Session.AdminIdle,
+			Absolute:  cfg.Session.Absolute,
+		},
+		Login:  identity.LoginPolicy{MaxFailedAttempts: cfg.Login.MaxFailures, Lockout: cfg.Login.Lockout},
+		Logger: l,
+	})
+	if err != nil {
+		return fmt.Errorf("identity service: %w", err)
+	}
+
 	deps := server.Deps{
-		Logger:    l,
-		Cfg:       cfg,
-		Version:   version,
-		StartedAt: startedAt,
-		Checkers:  []port.Checker{pg},
-		// Phase 3 swaps this for the RBAC evaluator. Deny-by-default is not a placeholder to
-		// be embarrassed about; it is the state §10 requires when no authorizer is known.
-		Authorizer: authz.DenyAll{},
+		Logger:     l,
+		Cfg:        cfg,
+		Version:    version,
+		StartedAt:  startedAt,
+		Checkers:   []port.Checker{pg},
+		Authorizer: authz.RBAC{Logger: l},
+		// The cookie read is a dependency of the service, not of a route: contracts/openapi.yaml
+		// declares sessionCookie at the top level, and B11's "fails on the next request" is only
+		// true if the next request is the one that reads the row.
+		Sessions: ident,
+	}
+
+	handler, err := server.New(deps)
+	if err != nil {
+		return err
 	}
 
 	srv := &http.Server{
 		Addr:              cfg.Address,
-		Handler:           server.New(deps),
+		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second, // slowloris: ReadTimeout alone does not cover the header phase
 		ReadTimeout:       cfg.HTTPTimeouts.Read,
 		WriteTimeout:      cfg.HTTPTimeouts.Write,

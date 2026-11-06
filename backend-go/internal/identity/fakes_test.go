@@ -37,6 +37,11 @@ type store struct {
 	userRoles   map[int64][]string
 	exceptional map[int64][]string
 
+	// scoped is the fake of identity.permissions.conditions (migration 0004): permission key →
+	// declared attribute conditions. Written as the literal name rather than authz's constant
+	// because authz imports this package, and a test that imported it back would be a cycle.
+	scoped map[string][]string
+
 	auditLog []audit.Entry
 
 	nextUser int64
@@ -58,6 +63,7 @@ func newStore() *store {
 		byEmail:     map[string]int64{},
 		sessions:    map[string]identity.Session{},
 		roles:       map[string][]string{},
+		scoped:      map[string][]string{},
 		userRoles:   map[int64][]string{},
 		exceptional: map[int64][]string{},
 	}
@@ -317,7 +323,18 @@ func (s *store) GrantsFor(_ context.Context, userID int64) (identity.Grants, err
 	}
 	add(s.exceptional[userID])
 	sort.Strings(perms)
-	return identity.Grants{Roles: roles, Permissions: perms}, nil
+
+	// Conditions are carried per granted key, the way the adapter reads them in the same row.
+	conditions := map[string][]string{}
+	for _, key := range perms {
+		if names := s.scoped[key]; len(names) > 0 {
+			conditions[key] = append([]string(nil), names...)
+		}
+	}
+	if len(conditions) == 0 {
+		conditions = nil
+	}
+	return identity.Grants{Roles: roles, Permissions: perms, Conditions: conditions}, nil
 }
 
 func contains(haystack []string, needle string) bool {
@@ -359,7 +376,18 @@ const (
 	superUserPerms = "identity.roles.manage,administration.system_settings.manage"
 )
 
+// conditionOwnerIsCaller is authz's registry name, repeated because authz imports this package
+// and a test that imported it back would be a cycle. TestKnownConditionsMatchTheRegistry in the
+// integration suite is what keeps the real two copies in step.
+const conditionOwnerIsCaller = "owner_is_caller"
+
 func (s *store) seedRoles() {
+	// The same keys migration 0004 declares as ownership-scoped, so a unit test that needs a
+	// narrowed permission is narrowing one the real catalogue narrows rather than a name this
+	// file invented.
+	s.scoped["shopping.cart.read"] = []string{conditionOwnerIsCaller}
+	s.scoped["ordering.orders.create"] = []string{conditionOwnerIsCaller}
+
 	s.roles["customer"] = split(customerPerms)
 	s.roles["admin_2_operations"] = split(adminTwoPerms)
 	s.roles["admin_1_business"] = split(adminOnePerms)

@@ -18,6 +18,7 @@ import (
 	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/apierr"
 	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/authz"
 	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/config"
+	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/identity"
 	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/observability"
 	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/port"
 	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/testhelper"
@@ -64,13 +65,13 @@ func TestHealthzAnswersWithoutTouchingAnyDependency(t *testing.T) {
 	l, _ := testhelper.Logger(t, slog.LevelDebug)
 	probe := &countingChecker{name: "postgresql"}
 
-	r := New(Deps{
+	r := engine(t, Deps{
 		Logger:     l,
 		Cfg:        testCfg("development"),
-		Authorizer: authz.DenyAll{},
-		Checkers:   []port.Checker{probe},
-		Version:    "v0.2.0-test",
-		StartedAt:  time.Now().Add(-90 * time.Second),
+		Authorizer: authz.RBAC{}, Sessions: noSession{},
+		Checkers:  []port.Checker{probe},
+		Version:   "v0.2.0-test",
+		StartedAt: time.Now().Add(-90 * time.Second),
 	})
 
 	resp, body := get(t, r, "/healthz", nil)
@@ -121,7 +122,7 @@ func (rr readyResponse) byName(t *testing.T, name string) (string, string) {
 
 func TestReadyzPassesWhenEveryDependencyPasses(t *testing.T) {
 	l, _ := testhelper.Logger(t, slog.LevelDebug)
-	r := New(Deps{Logger: l, Cfg: testCfg("development"), Authorizer: authz.DenyAll{},
+	r := engine(t, Deps{Logger: l, Cfg: testCfg("development"), Authorizer: authz.RBAC{}, Sessions: noSession{},
 		Checkers: []port.Checker{&fakeChecker{name: "postgresql"}, &fakeChecker{name: "daraja"}}, Version: "t"})
 
 	resp, body := get(t, r, "/readyz", nil)
@@ -146,7 +147,7 @@ func TestReadyzNamesTheFailingDependencyAndAnswers503(t *testing.T) {
 	l, _ := testhelper.Logger(t, slog.LevelDebug)
 	dbDown := &fakeChecker{name: "postgresql", err: errors.New("ping failed after 1s: driver: bad connection")}
 
-	r := New(Deps{Logger: l, Cfg: testCfg("development"), Authorizer: authz.DenyAll{},
+	r := engine(t, Deps{Logger: l, Cfg: testCfg("development"), Authorizer: authz.RBAC{}, Sessions: noSession{},
 		Checkers: []port.Checker{dbDown, &fakeChecker{name: "smtp"}}, Version: "t"})
 
 	resp, body := get(t, r, "/readyz", nil)
@@ -178,7 +179,7 @@ func TestReadyzSuppressesFailureDetailInProduction(t *testing.T) {
 	l, _ := testhelper.Logger(t, slog.LevelDebug)
 	secret := `dial tcp 10.20.0.7:5432: connect: connection refused (host "db-primary.internal" user "naoja_owner")`
 
-	r := New(Deps{Logger: l, Cfg: testCfg("production"), Authorizer: authz.DenyAll{},
+	r := engine(t, Deps{Logger: l, Cfg: testCfg("production"), Authorizer: authz.RBAC{}, Sessions: noSession{},
 		Checkers: []port.Checker{&fakeChecker{name: "postgresql", err: errors.New(secret)}}, Version: "t"})
 
 	resp, body := get(t, r, "/readyz", nil)
@@ -203,7 +204,7 @@ func TestReadyzChecksDependenciesConcurrently(t *testing.T) {
 	l, _ := testhelper.Logger(t, slog.LevelDebug)
 	slow := func() port.Checker { return &fakeChecker{name: "x", delay: 150 * time.Millisecond} }
 
-	r := New(Deps{Logger: l, Cfg: testCfg("development"), Authorizer: authz.DenyAll{}, Version: "t",
+	r := engine(t, Deps{Logger: l, Cfg: testCfg("development"), Authorizer: authz.RBAC{}, Sessions: noSession{}, Version: "t",
 		Checkers: []port.Checker{slow(), slow(), slow(), slow()}})
 
 	start := time.Now()
@@ -224,7 +225,7 @@ func TestReadyzHandsTheRequestContextToEveryChecker(t *testing.T) {
 	l, _ := testhelper.Logger(t, slog.LevelDebug)
 	sawID := &ctxChecker{}
 
-	r := New(Deps{Logger: l, Cfg: testCfg("development"), Authorizer: authz.DenyAll{},
+	r := engine(t, Deps{Logger: l, Cfg: testCfg("development"), Authorizer: authz.RBAC{}, Sessions: noSession{},
 		Checkers: []port.Checker{sawID}, Version: "t"})
 
 	resp, body := get(t, r, "/readyz", nil)
@@ -242,15 +243,17 @@ func TestReadyzHandsTheRequestContextToEveryChecker(t *testing.T) {
 
 // ── Protected routes ───────────────────────────────────────────────────────────────────────
 
-// Require is how every operation in Phase 4 onwards will be guarded. If the wiring is wrong
-// here — a middleware list that forgets to abort — every endpoint is public.
-func TestRequireRefusesThroughTheDenyAllAuthorizer(t *testing.T) {
+// Require is how every operation from here on is guarded. If the wiring is wrong — a middleware
+// list that forgets to abort, an authentication step registered after the check that depends on
+// it — every endpoint is public, so each direction is asserted separately against the real
+// evaluator rather than a stub that could be agreeable about the wrong thing.
+func TestRequireRefusesAnAnonymousRequest(t *testing.T) {
 	l, _ := testhelper.Logger(t, slog.LevelDebug)
-	d := Deps{Logger: l, Cfg: testCfg("development"), Authorizer: authz.DenyAll{}, Version: "t"}
+	d := Deps{Logger: l, Cfg: testCfg("development"), Authorizer: authz.RBAC{}, Sessions: noSession{}, Version: "t"}
 
-	r := New(d)
+	r := engine(t, d)
 	var reached atomic.Bool
-	r.POST("/api/v1/products", Require(d, "catalogue.products.write"), func(c *gin.Context) {
+	r.POST("/api/v1/products", Require(d, "catalogue.products.create"), func(c *gin.Context) {
 		reached.Store(true)
 	})
 
@@ -258,30 +261,138 @@ func TestRequireRefusesThroughTheDenyAllAuthorizer(t *testing.T) {
 	if reached.Load() {
 		t.Fatal("a protected handler executed without authorisation")
 	}
+	// 401, not 403: no authority was evaluated, because no caller was established. A
+	// PERMISSION_DENIED body would promise a missing_permission that does not exist.
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("status = %d body=%s, want 401", resp.StatusCode, body)
+	}
+	if e := envelope(t, body); e.Code != apierr.CodeNotAuthenticated {
+		t.Errorf("code = %q", e.Code)
+	}
+}
+
+func TestRequireRefusesASignedInCallerThatDoesNotHoldThePermission(t *testing.T) {
+	l, _ := testhelper.Logger(t, slog.LevelDebug)
+	customer := identity.Principal{User: identity.User{ID: 7}, CSRFToken: "csrf-for-this-session",
+		Permissions: []string{"ordering.orders.read"}}
+	d := Deps{Logger: l, Cfg: testCfg("development"), Authorizer: authz.RBAC{Logger: l},
+		Sessions: signedIn(customer), Version: "t"}
+
+	r := engine(t, d)
+	var reached atomic.Bool
+	r.POST("/api/v1/products", Require(d, "catalogue.products.create"), func(c *gin.Context) {
+		reached.Store(true)
+	})
+
+	// The CSRF header is supplied because this session is authenticated and the method is not
+	// safe — the two guards are both in the chain now, and a test that omits one fails for the
+	// wrong reason.
+	resp, body := do(t, r, http.MethodPost, "/api/v1/products",
+		http.Header{"X-CSRF-Token": {"csrf-for-this-session"}, "Cookie": {"naoja_session=token"}})
+	if reached.Load() {
+		t.Fatal("a caller without the grant reached its handler")
+	}
 	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("status = %d body=%s, want 403", resp.StatusCode, body)
+	}
+	if e := envelope(t, body); e.MissingPermission != "catalogue.products.create" {
+		t.Errorf("missing_permission = %q", e.MissingPermission)
+	}
+}
+
+func TestRequireGrantsTheCallerThatHoldsThePermission(t *testing.T) {
+	l, _ := testhelper.Logger(t, slog.LevelDebug)
+	admin := identity.Principal{User: identity.User{ID: 11}, CSRFToken: "csrf-for-this-session",
+		Permissions: []string{"catalogue.products.create"}}
+	d := Deps{Logger: l, Cfg: testCfg("development"), Authorizer: authz.RBAC{Logger: l},
+		Sessions: signedIn(admin), Version: "t"}
+
+	r := engine(t, d)
+	var reached atomic.Bool
+	r.POST("/api/v1/products", Require(d, "catalogue.products.create"), func(c *gin.Context) {
+		reached.Store(true)
+		c.Status(http.StatusNoContent)
+	})
+
+	resp, body := do(t, r, http.MethodPost, "/api/v1/products",
+		http.Header{"X-CSRF-Token": {"csrf-for-this-session"}, "Cookie": {"naoja_session=token"}})
+	if !reached.Load() {
+		t.Fatalf("an authorised request was refused: %d %s", resp.StatusCode, body)
+	}
+	if resp.StatusCode != http.StatusNoContent {
 		t.Fatalf("status = %d body=%s", resp.StatusCode, body)
 	}
-	if e := envelope(t, body); e.MissingPermission != "catalogue.products.write" {
-		t.Errorf("missing_permission = %q", e.MissingPermission)
+}
+
+// The order of Authenticate and CSRF in the chain is a correctness property, not a style
+// preference: CSRF compares against the token the session carries, and a session is only known
+// after the read. Registered the other way round, every unsafe request from a signed-in browser
+// would be refused for callers who sent the header — or, if the guard short-circuited on "no
+// principal", every one would be allowed through.
+func TestCSRFSeesThePrincipalAuthenticationInstalled(t *testing.T) {
+	l, _ := testhelper.Logger(t, slog.LevelDebug)
+	d := Deps{Logger: l, Cfg: testCfg("development"), Authorizer: &spyAuthorizer{},
+		Sessions: signedIn(identity.Principal{
+			User:        identity.User{ID: 7},
+			CSRFToken:   "csrf-for-this-session",
+			Permissions: []string{"catalogue.products.create"},
+		}), Version: "t"}
+
+	r := engine(t, d)
+	var reached atomic.Bool
+	r.POST("/api/v1/products", Require(d, "catalogue.products.create"), func(c *gin.Context) {
+		reached.Store(true)
+	})
+
+	// Same authenticated caller, same route, no header.
+	resp, _ := do(t, r, http.MethodPost, "/api/v1/products", http.Header{"Cookie": {"naoja_session=token"}})
+	if reached.Load() {
+		t.Fatal("an unsafe request without the CSRF header reached its handler")
+	}
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401 — the header is part of the declared security scheme", resp.StatusCode)
+	}
+}
+
+// Liveness must not consult a dependency, and the session read is one: a database outage that
+// made /healthz fail would make the orchestrator restart the API for no reason. Gin snapshots
+// the middleware list per route, which is what lets health be registered ahead of
+// Authenticate — this test is the proof that the ordering is doing that and not merely looking
+// deliberate.
+func TestHealthzNeverReadsASession(t *testing.T) {
+	l, _ := testhelper.Logger(t, slog.LevelDebug)
+	sessions := &countingSessions{}
+	d := Deps{Logger: l, Cfg: testCfg("development"), Authorizer: authz.RBAC{Logger: l},
+		Sessions: sessions, Version: "t"}
+
+	r := engine(t, d)
+	for _, path := range []string{"/healthz", "/readyz"} {
+		resp, body := do(t, r, http.MethodGet, path, http.Header{"Cookie": {"naoja_session=token"}})
+		if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusServiceUnavailable {
+			t.Fatalf("%s = %d %s", path, resp.StatusCode, body)
+		}
+	}
+	if sessions.calls.Load() != 0 {
+		t.Errorf("the session store was consulted %d times for the health endpoints", sessions.calls.Load())
 	}
 }
 
 func TestRequireNamesEveryPermissionTheOperationDeclared(t *testing.T) {
 	l, _ := testhelper.Logger(t, slog.LevelDebug)
 	spy := &spyAuthorizer{}
-	d := Deps{Logger: l, Cfg: testCfg("development"), Authorizer: spy, Version: "t"}
+	d := Deps{Logger: l, Cfg: testCfg("development"), Authorizer: spy, Sessions: noSession{}, Version: "t"}
 
-	r := New(d)
+	r := engine(t, d)
 	// The contract declares either key for the all-vs-own pair; the middleware must forward the
 	// whole list rather than only the first, or the second key can never grant access.
-	r.GET("/api/v1/orders", Require(d, "ordering.orders.read.all", "ordering.orders.read.own"),
+	r.GET("/api/v1/orders", Require(d, "ordering.orders.read.all", "ordering.orders.read"),
 		func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"reached": true}) })
 
 	if _, body := do(t, r, http.MethodGet, "/api/v1/orders", nil); !strings.Contains(body, `"reached":true`) {
 		t.Fatalf("handler did not run: %s", body)
 	}
-	if len(spy.last) != 2 || spy.last[1] != "ordering.orders.read.own" {
-		t.Errorf("authorizer saw %v, want both declared keys", spy.last)
+	if len(spy.last.Permissions) != 2 || spy.last.Permissions[1] != "ordering.orders.read" {
+		t.Errorf("authorizer saw %v, want both declared keys", spy.last.Permissions)
 	}
 }
 
@@ -291,7 +402,7 @@ func TestRequireNamesEveryPermissionTheOperationDeclared(t *testing.T) {
 // found", and a body that only exists for half the responses is how a frontend ends up guessing.
 func TestUnknownRouteRendersTheErrorEnvelope(t *testing.T) {
 	l, _ := testhelper.Logger(t, slog.LevelDebug)
-	r := New(Deps{Logger: l, Cfg: testCfg("development"), Authorizer: authz.DenyAll{}, Version: "t"})
+	r := engine(t, Deps{Logger: l, Cfg: testCfg("development"), Authorizer: authz.RBAC{}, Sessions: noSession{}, Version: "t"})
 
 	resp, body := do(t, r, http.MethodGet, "/api/v1/does-not-exist", http.Header{"Origin": {"http://localhost:5173"}})
 	if resp.StatusCode != http.StatusNotFound {
@@ -316,8 +427,8 @@ func TestUnknownRouteRendersTheErrorEnvelope(t *testing.T) {
 
 func TestWrongMethodRendersTheErrorEnvelope(t *testing.T) {
 	l, _ := testhelper.Logger(t, slog.LevelDebug)
-	d := Deps{Logger: l, Cfg: testCfg("development"), Authorizer: authz.DenyAll{}, Version: "t"}
-	r := New(d)
+	d := Deps{Logger: l, Cfg: testCfg("development"), Authorizer: authz.RBAC{}, Sessions: noSession{}, Version: "t"}
+	r := engine(t, d)
 	r.DELETE("/api/v1/products/:id", Require(d, "catalogue.products.delete"), func(c *gin.Context) {})
 
 	resp, body := do(t, r, http.MethodPut, "/api/v1/products/42", nil)
@@ -334,7 +445,7 @@ func TestWrongMethodRendersTheErrorEnvelope(t *testing.T) {
 // its proxy networks.
 func TestForwardedForCannotChooseTheClientIP(t *testing.T) {
 	l, _ := testhelper.Logger(t, slog.LevelDebug)
-	r := New(Deps{Logger: l, Cfg: testCfg("development"), Authorizer: authz.DenyAll{}, Version: "t"})
+	r := engine(t, Deps{Logger: l, Cfg: testCfg("development"), Authorizer: authz.RBAC{}, Sessions: noSession{}, Version: "t"})
 
 	var seen string
 	// Registered on POST because that is the verb the contract gives this operation; a GET here
@@ -364,8 +475,8 @@ func TestChainLogsOneAccessRecordPerRequestWithItsCorrelationID(t *testing.T) {
 	cfg.RequestIDTrust = true // only this test asserts an inbound trace id survives the chain
 	// A granting authorizer is a test double, not a production type: an exported AllowAll in the
 	// authz package is one careless import away from an open endpoint.
-	d := Deps{Logger: l, Cfg: cfg, Authorizer: &spyAuthorizer{}, Version: "t"}
-	r := New(d)
+	d := Deps{Logger: l, Cfg: cfg, Authorizer: &spyAuthorizer{}, Sessions: noSession{}, Version: "t"}
+	r := engine(t, d)
 	r.GET("/api/v1/products", Require(d, "catalogue.products.read"), func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"reached": true})
 	})
@@ -460,9 +571,43 @@ func (c *countingChecker) Check(context.Context) error {
 	return nil
 }
 
-type spyAuthorizer struct{ last []string }
+type spyAuthorizer struct{ last port.Request }
 
-func (s *spyAuthorizer) Authorize(_ context.Context, required []string) error {
-	s.last = append([]string(nil), required...)
+func (s *spyAuthorizer) Authorize(_ context.Context, req port.Request) error {
+	s.last = req
 	return nil
+}
+
+// noSession is the authentication middleware with nothing to find: every request arrives
+// anonymous, which is what most of these tests are about. A stub that returned a principal would
+// test the authorizer rather than the chain.
+type noSession struct{}
+
+func (noSession) Authenticate(context.Context, string) (identity.Principal, error) {
+	return identity.Principal{}, identity.ErrSessionNotFound
+}
+
+// signedIn answers every token with the same principal, which is enough to place a request on
+// one side or the other of the authentication boundary.
+type signedIn identity.Principal
+
+func (s signedIn) Authenticate(context.Context, string) (identity.Principal, error) {
+	return identity.Principal(s), nil
+}
+
+type countingSessions struct{ calls atomic.Int64 }
+
+func (c *countingSessions) Authenticate(context.Context, string) (identity.Principal, error) {
+	c.calls.Add(1)
+	return identity.Principal{}, identity.ErrSessionNotFound
+}
+
+// engine fails the test on the wiring error New returns, which is the point of it returning one.
+func engine(t *testing.T, d Deps) *gin.Engine {
+	t.Helper()
+	r, err := New(d)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	return r
 }

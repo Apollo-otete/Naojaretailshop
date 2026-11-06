@@ -5,9 +5,6 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
-
-	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/httpjson"
-	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/port"
 )
 
 // allowedHeaders mirrors what contracts/openapi.yaml actually asks a client to send. A
@@ -51,20 +48,6 @@ func CORS(l *slog.Logger, allowed []string) gin.HandlerFunc {
 
 		if c.Request.Method == http.MethodOptions {
 			c.AbortWithStatus(http.StatusNoContent)
-			return
-		}
-		c.Next()
-	}
-}
-
-// Authorize guards one operation with the permission keys declared in the contract. It runs
-// per route rather than globally because the permission a request needs is a property of the
-// operation, and the only way to keep the contract and the enforcement from diverging is to
-// bind them at the same line of code where the route is registered.
-func Authorize(l *slog.Logger, a port.Authorizer, permissions ...string) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		if err := a.Authorize(c.Request.Context(), permissions); err != nil {
-			httpjson.Fail(c, l, err)
 			return
 		}
 		c.Next()

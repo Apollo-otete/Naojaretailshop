@@ -14,7 +14,9 @@ import (
 
 	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/apierr"
 	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/authz"
+	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/identity"
 	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/observability"
+	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/port"
 	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/testhelper"
 )
 
@@ -387,16 +389,17 @@ func TestRequestsWithoutAnOriginHeaderGetNoCORSHeaders(t *testing.T) {
 // ── Authorize ──────────────────────────────────────────────────────────────────────────────
 
 // Deny-by-default is only a claim until something proves it. Every protected route goes through
-// here, so this is the test standing between Phase 2 and an accidentally public endpoint.
-func TestAuthorizeRefusesThroughDenyAllAndNeverReachesTheHandler(t *testing.T) {
+// here, so this is the test standing between an unfinished operation and a public endpoint —
+// against the real evaluator rather than a stub, because a stub can be agreeable about nothing
+// being authenticated.
+func TestAuthorizeRefusesAnUnauthenticatedRequest(t *testing.T) {
 	l := quiet(t)
 
 	r := gin.New()
 	r.Use(RequestID(l, false))
 	reached := false
-	r.GET("/orders/:ref", Authorize(l, authz.DenyAll{}, "ordering.orders.read.all"), func(c *gin.Context) {
+	r.GET("/orders/:ref", Authorize(l, authz.RBAC{Logger: l}, "ordering.orders.read.all"), func(c *gin.Context) {
 		reached = true
-		c.JSON(http.StatusOK, gin.H{"orders": []any{}})
 	})
 
 	rec := httptest.NewRecorder()
@@ -404,6 +407,33 @@ func TestAuthorizeRefusesThroughDenyAllAndNeverReachesTheHandler(t *testing.T) {
 
 	if reached {
 		t.Fatal("the handler ran without an authorizer saying yes")
+	}
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d body=%s, want 401", rec.Code, rec.Body.String())
+	}
+	if e := envelope(t, rec.Body.String()); e.Code != apierr.CodeNotAuthenticated {
+		t.Errorf("code = %q — nothing was decided about this caller's authority", e.Code)
+	}
+}
+
+func TestAuthorizeRefusesASignedInCallerLackingThePermission(t *testing.T) {
+	l := quiet(t)
+
+	r := gin.New()
+	r.Use(RequestID(l, false), authenticateAs(&identity.Principal{
+		User:        identity.User{ID: 7},
+		Permissions: []string{"ordering.orders.read"},
+	}))
+	reached := false
+	r.GET("/orders/:ref", Authorize(l, authz.RBAC{Logger: l}, "ordering.orders.read.all"), func(c *gin.Context) {
+		reached = true
+	})
+
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/orders/NJ-1", nil))
+
+	if reached {
+		t.Fatal("a caller without the declared permission reached its handler")
 	}
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want 403", rec.Code)
@@ -419,40 +449,18 @@ func TestAuthorizeRefusesThroughDenyAllAndNeverReachesTheHandler(t *testing.T) {
 	}
 }
 
-func TestAuthorizeRequiresAuthenticationEvenWithNoPermissionsListed(t *testing.T) {
-	// x-permissions absent means "any signed-in caller", never "anyone".
+func TestAuthorizeForwardsEveryDeclaredPermissionOfTheOperation(t *testing.T) {
 	l := quiet(t)
+	var seen port.Request
 
 	r := gin.New()
 	r.Use(RequestID(l, false))
 	reached := false
-	r.POST("/cart/items", Authorize(l, authz.DenyAll{}), func(c *gin.Context) { reached = true })
-
-	rec := httptest.NewRecorder()
-	r.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/cart/items", nil))
-
-	if reached {
-		t.Fatal("an unauthenticated write reached its handler")
-	}
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want 401 to distinguish 'sign in' from 'not allowed'", rec.Code)
-	}
-	if e := envelope(t, rec.Body.String()); e.Code != apierr.CodeNotAuthenticated {
-		t.Errorf("code = %q", e.Code)
-	}
-}
-
-func TestAuthorizeLetsAPermittedRequestThroughWithItsDeclaredPermissions(t *testing.T) {
-	l := quiet(t)
-	var seen []string
-
-	r := gin.New()
-	r.Use(RequestID(l, false))
-	reached := false
-	r.GET("/products", Authorize(l, allowAll{got: &seen}, "catalogue.products.read"), func(c *gin.Context) {
-		reached = true
-		c.Status(http.StatusOK)
-	})
+	r.GET("/products", Authorize(l, record{got: &seen}, "catalogue.products.read", "catalogue.products.read.draft"),
+		func(c *gin.Context) {
+			reached = true
+			c.Status(http.StatusOK)
+		})
 
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/products", nil))
@@ -463,15 +471,28 @@ func TestAuthorizeLetsAPermittedRequestThroughWithItsDeclaredPermissions(t *test
 	if rec.Code != http.StatusOK {
 		t.Errorf("status = %d", rec.Code)
 	}
-	if len(seen) != 1 || seen[0] != "catalogue.products.read" {
-		t.Errorf("the authorizer received %v, want the route's declared permission", seen)
+	if len(seen.Permissions) != 2 || seen.Permissions[1] != "catalogue.products.read.draft" {
+		t.Errorf("the authorizer received %v, want both keys the route declared — forwarding only the "+
+			"first would make the second key impossible to hold access through", seen.Permissions)
 	}
 }
 
-type allowAll struct{ got *[]string }
+// authenticateAs stands in for the session read in tests that are about what happens *after* a
+// principal exists. It installs one directly, which is exactly what Authenticate does after it
+// has checked a cookie.
+func authenticateAs(p *identity.Principal) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if p != nil {
+			c.Request = c.Request.WithContext(identity.WithPrincipal(c.Request.Context(), *p))
+		}
+		c.Next()
+	}
+}
 
-func (a allowAll) Authorize(_ context.Context, required []string) error {
-	*a.got = append(*a.got, required...)
+type record struct{ got *port.Request }
+
+func (r record) Authorize(_ context.Context, req port.Request) error {
+	*r.got = req
 	return nil
 }
 

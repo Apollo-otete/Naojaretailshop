@@ -141,15 +141,18 @@ func TestDownOneStepRollsBackExactlyOneMigration(t *testing.T) {
 		t.Fatalf("down 1: %v", err)
 	}
 
-	head := tableExists(t, conn, "identity", "users")
-	if head {
-		t.Error("identity.users survived a one-step rollback of the head migration")
+	// The head is 0004, which owns one column and no tables — so the assertion moves with it,
+	// exactly as the comment in the version before this one predicted. What must not move is the
+	// shape of the check: the head's own artifact disappears, and one thing from below it does
+	// not.
+	if columnExists(t, conn, "identity", "permissions", "conditions") {
+		t.Error("identity.permissions.conditions survived a one-step rollback of the head migration")
 	}
-	// system_settings belongs to the migration below it, which was not rolled back. When a 0004
-	// lands this assertion is the one that starts failing, and the fix is to move both checks one
-	// migration forward rather than to delete them.
-	if !tableExists(t, conn, "administration", "system_settings") {
-		t.Error("a one-step rollback removed a table it did not own")
+	for _, owned := range [][2]string{{"identity", "users"}, {"identity", "permissions"},
+		{"administration", "system_settings"}} {
+		if !tableExists(t, conn, owned[0], owned[1]) {
+			t.Errorf("a one-step rollback removed %s.%s, which an earlier migration owns", owned[0], owned[1])
+		}
 	}
 	// The schemas belong to migration 0001, which was not rolled back.
 	assertSchemas(t, conn, true)
@@ -157,6 +160,18 @@ func TestDownOneStepRollsBackExactlyOneMigration(t *testing.T) {
 	if _, _, err := m.Up(); err != nil {
 		t.Fatalf("recovering: %v", err)
 	}
+}
+
+func columnExists(t *testing.T, conn *pgx.Conn, schema, table, column string) bool {
+	t.Helper()
+	var exists bool
+	if err := conn.QueryRow(context.Background(),
+		`SELECT EXISTS (SELECT 1 FROM information_schema.columns
+		 WHERE table_schema = $1 AND table_name = $2 AND column_name = $3)`,
+		schema, table, column).Scan(&exists); err != nil {
+		t.Fatalf("checking %s.%s.%s: %v", schema, table, column, err)
+	}
+	return exists
 }
 
 func tableExists(t *testing.T, conn *pgx.Conn, schema, table string) bool {

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/authz"
 	"github.com/Apollo-otete/Naojaretailshop/backend-go/migrations"
 )
 
@@ -222,6 +223,91 @@ func TestUnratifiedSeedsAreMarkedAsPlaceholders(t *testing.T) {
 				t.Errorf("a seeded *_cents value with ratified=false must be described as a placeholder so it cannot be read as an approved term:\n\t%s",
 					strings.TrimSpace(line))
 			}
+		}
+	}
+}
+
+// ADR-024's second gate is one list written in two places: the condition names internal/authz
+// implements, and the names identity.permissions will accept (0004's CHECK constraint). The
+// direction that actually matters is data ahead of code — a catalogue row naming a rule nothing
+// evaluates — and the constraint is what refuses it. It only refuses if its literal really lists
+// the registry, so the two are compared here, with no server involved.
+func TestConditionsTheSchemaAcceptsAreTheOnesGoImplements(t *testing.T) {
+	var accepted []string
+	for _, f := range load(t) {
+		m := regexp.MustCompile(`conditions <@ ARRAY\[(.*?)\]::text\[\]`).FindStringSubmatch(f.up)
+		if m == nil {
+			continue
+		}
+		if len(accepted) > 0 {
+			t.Fatalf("two migrations constrain identity.permissions.conditions; the registry can only be"+
+				" compared against one of them (%04d_%s and an earlier one)", f.version, f.name)
+		}
+		for _, quoted := range regexp.MustCompile(`'([a-z_]+)'`).FindAllStringSubmatch(m[1], -1) {
+			accepted = append(accepted, quoted[1])
+		}
+	}
+	if len(accepted) == 0 {
+		t.Fatal("no migration constrains identity.permissions.conditions to an implemented set — " +
+			"an unimplemented condition name in the data would then be decided by whatever the code" +
+			" happens to do with an unknown key")
+	}
+
+	sort.Strings(accepted)
+	implemented := authz.KnownConditions()
+	if strings.Join(accepted, ",") != strings.Join(implemented, ",") {
+		t.Errorf("the schema accepts %v but internal/authz implements %v", accepted, implemented)
+	}
+}
+
+// The `[own]` marker inside a permission's description (0003) and the key listed in 0004's
+// declaration are one claim authored twice, in two files. The migration's DO block compares the
+// two against the live table; this compares the source, which is the copy a reviewer can act on
+// before anything is deployed — and which costs no database to check.
+func TestOwnershipIsDeclaredForEveryKeyTheProseMarksOwn(t *testing.T) {
+	files := map[uint]string{}
+	for _, f := range load(t) {
+		files[f.version] = f.up
+	}
+	up0003, up0004 := files[3], files[4]
+	if up0003 == "" || up0004 == "" {
+		t.Fatal("expected a 0003 identity seed and a 0004 attribute-conditions migration")
+	}
+
+	marked := map[string]bool{}
+	row := regexp.MustCompile(`^\s*\('([a-z_.]+)',`)
+	for _, line := range strings.Split(up0003, "\n") {
+		code := stripComment(line)
+		m := row.FindStringSubmatch(code)
+		if m == nil {
+			continue
+		}
+		if strings.Contains(code, "[own]") {
+			marked[m[1]] = true
+		}
+	}
+
+	declared := map[string]bool{}
+	block := regexp.MustCompile(`(?s)SET conditions = ARRAY\[.*?\]\s+WHERE key IN \((.*?)\);`).FindStringSubmatch(up0004)
+	if block == nil {
+		t.Fatal("0004 no longer declares the ownership-scoped keys in one explicit IN list — deriving them" +
+			" from the description would make the assertion below a tautology")
+	}
+	for _, quoted := range regexp.MustCompile(`'([a-z_.]+)'`).FindAllStringSubmatch(block[1], -1) {
+		declared[quoted[1]] = true
+	}
+
+	if len(declared) == 0 {
+		t.Fatal("0004 declares no keys at all")
+	}
+	for key := range marked {
+		if !declared[key] {
+			t.Errorf("%q is described as [own] but declares no condition, so the ownership rule is prose only", key)
+		}
+	}
+	for key := range declared {
+		if !marked[key] {
+			t.Errorf("%q declares owner_is_caller without being marked [own] in 0003's description", key)
 		}
 	}
 }

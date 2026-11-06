@@ -3,6 +3,7 @@ package identity_test
 import (
 	"context"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -398,6 +399,42 @@ func TestLogoutIsIdempotentAndRevokesOnlyItsOwnSession(t *testing.T) {
 	}
 	if _, err := h.service.Authenticate(context.Background(), other.Session.Token); err != nil {
 		t.Errorf("the account's other session was affected by a single logout: %v", err)
+	}
+}
+
+// ADR-024's second gate reads Principal.Conditions, so the snapshot has to arrive together with
+// the permissions it narrows — one read, one moment, and the same values on both paths that
+// build a principal. A divergence between the register response and the next request's read is
+// a session whose /auth/session body describes a caller the evaluator disagrees about.
+func TestThePrincipalCarriesTheConditionsDeclaredForItsPermissions(t *testing.T) {
+	h := newHarness(t)
+	auth := h.register(shopEmail, shopPhone)
+
+	if got := auth.Principal.Conditions["shopping.cart.read"]; len(got) != 1 || got[0] != conditionOwnerIsCaller {
+		t.Fatalf("register issued %v, want the declared owner_is_caller", auth.Principal.Conditions)
+	}
+
+	principal, err := h.service.Authenticate(context.Background(), auth.Session.Token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(principal.Conditions, auth.Principal.Conditions) {
+		t.Errorf("the next read reports %v where the login reported %v",
+			principal.Conditions, auth.Principal.Conditions)
+	}
+
+	// B12's shape, for a condition instead of a permission: changing what the catalogue declares
+	// changes the next request, with nobody signing in again.
+	h.store.scoped["shopping.cart.read"] = nil
+	after, err := h.service.Authenticate(context.Background(), auth.Session.Token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(after.Conditions["shopping.cart.read"]) != 0 {
+		t.Error("a condition removed from the catalogue is still being carried")
+	}
+	if len(after.Permissions) != len(principal.Permissions) {
+		t.Errorf("removing a condition moved a permission too: %v", after.Permissions)
 	}
 }
 

@@ -4,11 +4,17 @@ Phase 2 of the reform described in `Naoja_Retail_Shop_Architecture_and_Reform_De
 This is **not the live shop**: `../backend` (Express + MongoDB/Mongoose) keeps serving while this
 service grows. Nothing here is deployed and nothing here talks to production.
 
-The deliverable for this phase is §19 step 5 — *"Go service skeleton, configuration, logging,
-health checks, PostgreSQL connection, migrations, and test harness"* — against the Phase 2 exit
-criterion in §13: *"Deployable API skeleton with automated checks."*
+§19 step 5 — *"Go service skeleton, configuration, logging, health checks, PostgreSQL
+connection, migrations, and test harness"* — is complete against its Phase 2 exit criterion:
+*"Deployable API skeleton with automated checks."*
 
-It satisfies that as of this writing:
+Work is now on **step 6** (*"Build identity/RBAC and catalogue as the first vertical slices, with
+tests and a usable frontend integration"*), whose Phase 3 exit criterion is *"Role lifecycle and
+authorization tests pass"*. The identity half exists — the schema, the Argon2id and session rules,
+the RBAC evaluator and its ownership conditions, and the middleware chain that applies them. The
+contract's `/auth` endpoints and the catalogue slice do not. See *Deliberate state* below.
+
+Both criteria are checkable here:
 
 ```
 make check             # gofmt -l clean, go vet clean, unit tests pass
@@ -47,9 +53,9 @@ internal/config/  environment → typed Config, plus the rules that refuse an un
 internal/observability/  slog JSON, request ids on the context
 internal/apierr/  the single vocabulary of failures — no HTTP or database imports
 internal/httpjson/   the only code that writes a response body
-internal/httpmw/  request id, access log, recovery, CORS, per-route authorisation
+internal/httpmw/  request id, access log, recovery, CORS, session read, CSRF, authorisation
 internal/port/    the interfaces (Checker, Authorizer) adapters implement — imports no Gin
-internal/authz/   the Authorizer implementations. Today: DenyAll
+internal/authz/   the RBAC evaluator and the attribute-condition registry (ADR-024)
 internal/database/    pgx pool + golang-migrate over embedded SQL
 internal/server/  engine assembly and the health endpoints
 migrations/sql/   versioned up/down pairs, embedded into the binary
@@ -76,7 +82,10 @@ trusting a checklist.
 |---|---|---|
 | Secrets never in logs (§10) | `config.Database.RedactedURL` | `TestRedactedURLNeverCarriesThePassword` |
 | No `Access-Control-Allow-Origin: *` with credentials (ADR-019) | `config.Validate` | the process refuses to start |
-| Deny by default (§10) | `authz.DenyAll`, `httpmw.Authorize` | `TestAuthorizeRefusesThroughDenyAllAndNeverReachesTheHandler` |
+| Deny by default (§10) | `authz.RBAC`, `httpmw.Authorize` | `TestRequireRefusesAnAnonymousRequest`, `TestAnonymousRequestIsRefusedBeforeAnythingIsNarrowed` |
+| A revoked or de-permissioned caller fails on the **next request** (B11, B12, ADR-019) | `identity.Service.Authenticate` + `httpmw.Authenticate`, both read per request with no cache | `TestOneEvaluatorAnswersForEveryCallerWithoutRememberingAny`, `TestRemovingAPermissionFromARoleRemovesItFromItsMembers` |
+| `[own]` permissions are narrowed by ownership (matrix §2, ADR-024) | `identity.permissions.conditions` + `authz.conditions` | `TestOwnershipNarrowsAPermissionTheCallerHolds`, `TestOwnershipIsDeclaredForEveryKeyTheProseMarksOwn`, `TestTheCatalogueRefusesAConditionNothingImplements` |
+| A dead session cannot make a public route fail | `httpmw.Authenticate` clears and continues | `TestADeadSessionContinuesAnonymousAndClearsTheCookie`, `TestHealthzNeverReadsASession` |
 | One error shape (contract `Error`) | `apierr` + `httpjson.Write` | `TestWriteRendersTheContractEnvelopeWithTheCorrelationID` |
 | A 500 leaks nothing (§10) | `apierr.AsFailure` default | `TestInternalCauseIsNeverSerialized` |
 | Correlation id on every line (§10) | `httpmw.RequestID`, `observability.From` | `TestChainLogsOneAccessRecordPerRequestWithItsCorrelationID` |
@@ -89,17 +98,23 @@ trusting a checklist.
 
 ---
 
-## Deliberate state: nothing is authorised yet
+## Deliberate state: the authority exists, the endpoints do not
 
-Every protected route would today answer **403** (or 401 with no permissions declared), because
-`cmd/api` wires `authz.DenyAll{}`. That is Phase 3's job — the RBAC evaluator over
-`identity.user_roles` and `identity.user_permissions`, driven by the `x-permissions` keys in
-`contracts/openapi.yaml`.
+Authorisation is real: `cmd/api` wires `authz.RBAC` over the seeded catalogue, every route is
+behind `httpmw.Authenticate` and `httpmw.CSRF`, and there is no allow-stub anywhere in the tree.
+
+What is missing is a way to *get* a session: the contract's `/auth/register`, `/auth/login`,
+`/auth/logout`, `/auth/session` and `/auth/password/change` handlers are the next step, and until
+they exist no request can carry a cookie that `Authenticate` will accept. The use cases behind
+them are already written and tested (`internal/identity`), so those endpoints are thin.
 
 An allow-stub would have made the skeleton "work" and is exactly how an unauthenticated endpoint
-ships by accident. Deny-by-default is the state §10 requires when no authorizer is known to exist.
+ships by accident; DenyAll was its safe version, and it was replaced rather than relaxed.
 
-Also not present, on purpose, in this phase: any endpoint from the contract, authentication,
+Also not present, on purpose: any business endpoint from the contract, the per-address login rate
+limiter (ADR-019's other half — matrix B14 and §10 name it, and it needs `system_settings`
+thresholds to be worth writing), the breached-password-list check `contracts/openapi.yaml`
+requires for registration (no ADR covers which provider answers it), a request body size limit,
 `pgx`-generated queries (`sqlc` arrives with the first real repository), the Daraja adapter, and
 background jobs. Migration-on-boot is **off** by default (`AUTO_MIGRATE=false`); schema changes
 belong to the deploy step, where a human can take a backup first.
@@ -149,4 +164,6 @@ Two rules are worth knowing before adding a file:
 4. `docs/adr/ADR-015-023-open-item-resolutions.md` — ADR-015…017, 019…023 Accepted;
    **ADR-018 (delivery terms) is still open**. ADR-001…014 are the reform document's own §7
    decisions and have no separate file.
+6. `docs/adr/ADR-024-attribute-conditions-on-role-permissions.md` — **Proposed**; the second gate
+   on top of the permission check, and the two questions it leaves open.
 5. `contracts/openapi.yaml` — the API contract Phase 4+ implements.

@@ -72,11 +72,21 @@ type SessionStore interface {
 // exceptional grants that have not expired and have not been revoked.
 //
 // It is a value rather than two separate calls because the union is the thing that must not be
-// gotten twice, and because this exact shape is what the RBAC evaluator caches (a short-lived
-// entry that the grant tables invalidate on change — ADR-019).
+// gotten twice, and because a caller that had to assemble permissions and their conditions from
+// separate reads could assemble them from different moments.
 type Grants struct {
 	Roles       []string
 	Permissions []string
+
+	// Conditions maps a permission key to the attribute rules declared against it in
+	// identity.permissions.conditions (ADR-024). Keys with no conditions are absent rather than
+	// mapped to an empty slice: the interesting question at the evaluator is "is this
+	// permission narrowed", and an absent key answers it without distinguishing nil from
+	// len 0.
+	//
+	// This is also what the contract's Session.scoped_permissions is rendered from — the keys
+	// the backend evaluates against ownership.
+	Conditions map[string][]string
 }
 
 // GrantReader reads the authority tables. B12 — removing a permission from a role removes it

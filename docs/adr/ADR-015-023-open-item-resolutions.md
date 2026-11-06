@@ -19,6 +19,11 @@ because its zone coverage and fee amounts are commercial terms only Naoja Ventur
 — the three inputs needed are listed in its **Status** block. Nothing in Phase 2 or Phase 3
 depends on ADR-018; Phase 5 does.
 
+**ADR-024** (attribute conditions as a second gate on role permissions, **Proposed**) is recorded
+in its own file, `ADR-024-attribute-conditions-on-role-permissions.md`. It was raised during
+Phase 3 implementation rather than from §18, and its two open items do not block the identity
+slice.
+
 
 ---
 

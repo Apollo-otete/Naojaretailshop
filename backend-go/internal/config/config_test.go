@@ -15,6 +15,8 @@ func valid() Config {
 		Database:          Database{URL: "postgres://naoja:s3cr3t-word@localhost:5433/naoja?sslmode=disable", MaxConns: 12, MinConns: 1, PingBudget: 3 * time.Second},
 		CORS:              CORS{AllowedOrigins: []string{"http://localhost:5173"}},
 		SessionCookieName: "naoja_session",
+		Session:           Session{Idle: 30 * time.Minute, AdminIdle: 15 * time.Minute, Absolute: 12 * time.Hour},
+		Login:             Login{MaxFailures: 5, Lockout: 15 * time.Minute},
 	}
 }
 
@@ -76,6 +78,25 @@ func TestValidateRejectsEachInsecureOrAmbiguousValue(t *testing.T) {
 			name:   "no cookie name",
 			mutate: func(c *Config) { c.SessionCookieName = "" },
 			want:   "SESSION_COOKIE_NAME",
+		},
+		{
+			// ADR-019's one security claim about lifetime: the administrative session is the
+			// shorter-lived class. Inverting it is a typo away, and nothing else would notice.
+			name:   "admin idle longer than customer idle",
+			mutate: func(c *Config) { c.Session.AdminIdle = 2 * time.Hour },
+			want:   "SESSION_ADMIN_IDLE",
+		},
+		{
+			// A cap under the idle window means every session dies at the cap and the sliding
+			// window is a lie the configuration tells itself.
+			name:   "absolute cap under the idle window",
+			mutate: func(c *Config) { c.Session.Absolute = time.Minute },
+			want:   "SESSION_ABSOLUTE",
+		},
+		{
+			name:   "login lockout disabled",
+			mutate: func(c *Config) { c.Login.MaxFailures = 0 },
+			want:   "LOGIN_MAX_FAILURES",
 		},
 	}
 

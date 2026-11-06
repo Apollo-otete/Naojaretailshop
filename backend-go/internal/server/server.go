@@ -4,6 +4,8 @@
 package server
 
 import (
+	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"time"
@@ -12,24 +14,44 @@ import (
 
 	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/apierr"
 	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/config"
+	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/httpcookie"
 	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/httpjson"
 	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/httpmw"
 	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/observability"
 	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/port"
 )
 
+// ErrMissingDependency is what New reports for a wiring that would silently degrade the chain.
+// It is an error rather than a panic because main.go already turns a startup error into exit 1,
+// and a service that comes up without an authorizer is the outage this package should refuse to
+// produce.
+var ErrMissingDependency = errors.New("server is not fully wired")
+
 type Deps struct {
 	Logger     *slog.Logger
 	Cfg        config.Config
 	Authorizer port.Authorizer
-	Checkers   []port.Checker
-	Version    string
-	StartedAt  time.Time
+
+	// Sessions is the per-request session cookie read (ADR-019). It is a dependency of the
+	// whole service rather than of one route because the contract declares sessionCookie at
+	// the top level: there is no operation whose authorization answer may depend on a cookie
+	// nobody looked at.
+	Sessions  httpmw.Sessions
+	Checkers  []port.Checker
+	Version   string
+	StartedAt time.Time
 }
 
 // New builds the engine without starting a listener, so the whole chain — request id, CORS,
-// recovery, authorizer, error envelope — can be exercised by httptest with no port involved.
-func New(d Deps) *gin.Engine {
+// recovery, authentication, CSRF, error envelope — can be exercised by httptest with no port
+// involved.
+func New(d Deps) (*gin.Engine, error) {
+	if d.Authorizer == nil {
+		return nil, fmt.Errorf("%w: Authorizer — with none, every protected operation would either be open or refused by a stub", ErrMissingDependency)
+	}
+	if d.Sessions == nil {
+		return nil, fmt.Errorf("%w: Sessions — without the cookie read nothing reaches a handler with a principal, and the authorizer can only say no", ErrMissingDependency)
+	}
 	if d.Logger == nil {
 		d.Logger = slog.Default()
 	}
@@ -59,7 +81,26 @@ func New(d Deps) *gin.Engine {
 	r.Use(httpmw.Access(d.Logger))
 	r.Use(httpmw.CORS(d.Logger, d.Cfg.CORS.AllowedOrigins))
 
+	// Health is registered *before* the next two Use calls, and that is not incidental: Gin
+	// snapshots the middleware list when a route is registered, so these routes are served
+	// without a session read. §10's liveness rule — never touch a dependency to answer "am I
+	// alive" — would otherwise be broken by a database outage turning /healthz into a 500 and
+	// the orchestrator into a restart storm.
 	registerHealth(r, d)
+
+	// Everything from here on is authenticated, because the contract puts sessionCookie in the
+	// top-level security list. CSRF follows Authenticate for a mechanical reason: the token it
+	// compares against is carried by the principal Authenticate installs, so the order is the
+	// difference between a check and a no-op.
+	cookie := httpcookie.Session{
+		Name: d.Cfg.SessionCookieName,
+		// A Secure-only cookie cannot be set over http://localhost, so the development
+		// machine would never exercise the cookie path at all. Production is the only
+		// environment where cleartext is a real exposure.
+		Secure: d.Cfg.IsProduction(),
+	}
+	r.Use(httpmw.Authenticate(d.Logger, d.Sessions, cookie))
+	r.Use(httpmw.CSRF(d.Logger))
 
 	// Unmatched routes get the contract envelope. Gin's default is a plain-text "404 page not
 	// found", which any client that parses errors has to special-case — and a body that only
@@ -72,7 +113,7 @@ func New(d Deps) *gin.Engine {
 			"This resource does not accept that method."))
 	})
 
-	return r
+	return r, nil
 }
 
 // Require registers a protected operation. The permission keys sit next to the route so the

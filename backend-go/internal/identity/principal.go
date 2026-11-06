@@ -14,6 +14,14 @@ type Principal struct {
 	Roles       []string
 	Permissions []string
 
+	// Conditions is the attribute half of the same read: which of Permissions carry a declared
+	// condition (ADR-024), keyed by permission. It travels with the principal for the reason
+	// Permissions does — the snapshot that answered "may this caller" must be the same one that
+	// answered "who is this", and both come from one GrantsFor per request. Nothing here is
+	// cached across requests: a stale condition would be a stale authorisation answer, which is
+	// exactly what B11 and B12 forbid.
+	Conditions map[string][]string
+
 	// SessionID is which session carried this principal, not who the principal is. Logout has
 	// to revoke one row rather than every row an account happens to have open elsewhere.
 	SessionID int64

@@ -283,7 +283,7 @@ func (s *Service) Authenticate(ctx context.Context, token string) (Principal, er
 	if err != nil {
 		return Principal{}, err
 	}
-	return Principal{User: user, SessionID: session.ID, CSRFToken: session.CSRFToken, Roles: grants.Roles, Permissions: grants.Permissions}, nil
+	return principalOf(user, session, grants), nil
 }
 
 // Logout revokes exactly the presenting session and succeeds either way. Contract: calling it
@@ -386,8 +386,20 @@ func (s *Service) failedLogin(ctx context.Context, user User, ip string, now tim
 }
 
 func (s *Service) authenticated(user User, session Session, grants Grants) Authenticated {
-	return Authenticated{
-		Session:   session,
-		Principal: Principal{User: user, SessionID: session.ID, CSRFToken: session.CSRFToken, Roles: grants.Roles, Permissions: grants.Permissions},
+	return Authenticated{Session: session, Principal: principalOf(user, session, grants)}
+}
+
+// principal is the only place a Principal is assembled, and the reason it is one function is
+// ADR-019's: the register-login path, the login path and the per-request read must not be able to
+// disagree about what a caller holds. A divergence there is a session that authorises differently
+// from the /auth/session body describing it.
+func principalOf(user User, session Session, grants Grants) Principal {
+	return Principal{
+		User:        user,
+		SessionID:   session.ID,
+		CSRFToken:   session.CSRFToken,
+		Roles:       grants.Roles,
+		Permissions: grants.Permissions,
+		Conditions:  grants.Conditions,
 	}
 }
