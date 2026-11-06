@@ -195,8 +195,8 @@ export default function LiveOverviewTab({ liveData, events, soundEnabled, setSou
                 </span>
               </div>
               <div className="flex items-center justify-between pb-2 border-b border-gray-50">
-                <span className="text-gray-500">Lurambi Store Dispatch</span>
-                <span className="font-bold text-gray-800">Open (8:30am - 8:00pm)</span>
+                <span className="text-gray-500">Online Storefront</span>
+                <span className="font-bold text-gray-800">Open 24/7</span>
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-gray-500">Business WhatsApp</span>

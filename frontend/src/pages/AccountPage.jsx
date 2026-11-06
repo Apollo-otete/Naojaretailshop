@@ -2,6 +2,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { useState, useEffect } from 'react';
 import { Package, MapPin, Truck, Headphones, Send, Clock, CheckCircle } from 'lucide-react';
 import Layout from '../components/Layout';
+import SEO from '../components/SEO';
 import { api } from '../lib/api';
 
 const TABS = [
@@ -92,10 +93,11 @@ export default function AccountPage() {
 
   return (
     <Layout>
+      <SEO title="Track Your Order" description="Track your Naoja Ventures order in Kakamega using your order reference and phone number." noindex />
       <div className="max-w-7xl mx-auto px-4 py-8">
-        <div className="grid lg:grid-cols-[260px_1fr] gap-8">
+        <div className="grid grid-cols-1 lg:grid-cols-[260px_minmax(0,1fr)] gap-8">
           {/* Sidebar */}
-          <aside className="bg-white border border-gray-200 rounded-card p-3 sm:p-5 h-fit shadow-sm">
+          <aside className="min-w-0 bg-white border border-gray-200 rounded-card p-3 sm:p-5 h-fit shadow-sm">
             <h2 className="hidden lg:block font-extrabold text-gray-900 mb-4 px-2 text-base uppercase tracking-wider text-gray-400 text-xs">My Account</h2>
             <nav className="flex lg:flex-col gap-1.5 overflow-x-auto no-scrollbar py-1 lg:py-0">
               {TABS.map((tab) => {
@@ -119,7 +121,7 @@ export default function AccountPage() {
           </aside>
 
           {/* Content */}
-          <main className="bg-white border border-gray-200 rounded-card p-6 sm:p-8 shadow-sm">
+          <main className="min-w-0 bg-white border border-gray-200 rounded-card p-6 sm:p-8 shadow-sm">
             {/* Orders Tab */}
             {activeTab === 'orders' && (
               <section className="space-y-6">
@@ -236,7 +238,7 @@ export default function AccountPage() {
 
                     <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 text-xs text-blue-800 space-y-1">
                       <p className="font-bold">Need assistance with your delivery?</p>
-                      <p>Our Lurambi shop helpline is open Sunday–Thursday (8:30am–8:00pm) and Friday (8:30am–3:00pm). Call us at <strong>0112079767</strong>.</p>
+                      <p>Contact us about your delivery at <strong>0112079767</strong>.</p>
                     </div>
                   </div>
                 ) : (
@@ -275,11 +277,10 @@ export default function AccountPage() {
                   </div>
 
                   <div className="bg-surface rounded-card p-5 border border-gray-200 space-y-3">
-                    <h3 className="font-bold text-gray-900 text-base">Shop Working Hours</h3>
+                    <h3 className="font-bold text-gray-900 text-base">Online Ordering &amp; Pickup</h3>
                     <div className="text-sm text-gray-600 space-y-1">
-                      <p className="flex justify-between"><span>Sunday - Thursday:</span> <strong>8:30 AM - 8:00 PM</strong></p>
-                      <p className="flex justify-between"><span>Friday:</span> <strong>8:30 AM - 3:00 PM</strong></p>
-                      <p className="flex justify-between text-red-600 font-semibold"><span>Saturday:</span> <strong>Closed</strong></p>
+                      <p className="flex justify-between"><span>Online orders:</span> <strong>24/7</strong></p>
+                      <p className="flex justify-between"><span>Pickup:</span> <strong>Available daily</strong></p>
                     </div>
                   </div>
                 </div>
@@ -311,8 +312,7 @@ export default function AccountPage() {
                     <div className="text-sm text-gray-600 space-y-2 pt-2">
                       <p>• We deliver within Kakamega town and surrounding neighborhoods (Lurambi, Kefinco, Amalemba, Joyland, Milimani).</p>
                       <p>• Delivery fee is flat **KSh 150**. Orders **above KSh 600** qualify for **Free Delivery**.</p>
-                      <p>• Delivery hours: Sunday-Friday, 8:30 AM - 4:00 PM.</p>
-                      <p>• Orders before 4:00 PM are delivered same-day. Orders after 4:00 PM go out the next morning.</p>
+                      <p>• Online orders are accepted 24/7. Delivery is available Sunday through Friday; no deliveries are made on Saturdays.</p>
                     </div>
                   </div>
 
@@ -323,7 +323,7 @@ export default function AccountPage() {
                     </div>
                     <div className="text-sm text-gray-600 space-y-2 pt-2">
                       <p>• You can place an order and pick it up physically from our Lurambi store opposite Bamboo.</p>
-                      <p>• Pickups are ready within **1 to 2 hours** of ordering during business hours.</p>
+                      <p>• Pickup is available daily. We will confirm when your order is ready.</p>
                       <p>• Pickup is completely free of charge.</p>
                       <p>• Please bring your order name and M-Pesa reference message to the counter for verification.</p>
                     </div>
@@ -346,7 +346,7 @@ export default function AccountPage() {
                     <div className="bg-surface rounded-card p-5 border border-gray-200 space-y-4">
                       <div>
                         <h4 className="font-bold text-gray-800 text-sm">Direct Support lines</h4>
-                        <p className="text-xs text-gray-500 mt-1">Our phone support is open 8:30am-8:00pm (Sunday-Thursday).</p>
+                        <p className="text-xs text-gray-500 mt-1">Contact us by phone, WhatsApp, or email for assistance.</p>
                       </div>
                       <div className="text-sm text-gray-600 space-y-2.5">
                         <p>📞 Phone: <a href="tel:01122079767" className="text-brand-500 font-semibold hover:underline">01122079767</a></p>

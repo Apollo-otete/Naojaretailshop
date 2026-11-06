@@ -97,7 +97,7 @@ export default function Header() {
             <span className="hidden sm:inline text-gray-500">•</span>
             <span className="hidden sm:flex items-center gap-1 text-gray-300">
               <Zap className="w-3.5 h-3.5 text-emerald-400" />
-              <span>Same-Day Delivery in Kakamega & Lurambi</span>
+              <span>Delivery Sunday-Friday in Kakamega & Lurambi</span>
             </span>
             <span className="hidden md:inline text-gray-500">•</span>
             <span className="hidden md:flex items-center gap-1 text-emerald-400 font-semibold">
@@ -129,7 +129,7 @@ export default function Header() {
       {/* ── 2. MAIN MARKETPLACE HEADER ── */}
       <header className="sticky top-0 z-40 bg-white border-b border-gray-200 shadow-sm">
         <div className="max-w-7xl mx-auto px-4">
-          <div className="h-18 lg:h-20 flex items-center justify-between gap-3 lg:gap-8">
+          <div className="h-18 lg:h-20 flex items-center justify-between gap-2 sm:gap-3 lg:gap-8">
             
             {/* Logo */}
             <div className="flex items-center gap-2">
@@ -138,7 +138,7 @@ export default function Header() {
                   N
                 </div>
                 <div className="flex flex-col">
-                  <span className="text-2xl font-black tracking-tight text-gray-950 flex items-center gap-1">
+                  <span className="text-xl sm:text-2xl font-black tracking-tight text-gray-950 flex items-center gap-1">
                     NAOJA
                     <span className="text-xs uppercase bg-brand-500 text-white font-extrabold px-1.5 py-0.5 rounded tracking-normal">
                       Retail
@@ -175,12 +175,12 @@ export default function Header() {
             </div>
 
             {/* Right Action Hub */}
-            <div className="flex items-center gap-2 sm:gap-4">
+            <div className="shrink-0 flex items-center gap-1 sm:gap-4">
               
               {/* Account Dropdown */}
               <Link
                 to="/account"
-                className="flex items-center gap-2 p-2 hover:bg-gray-50 rounded-xl transition-colors text-gray-700"
+                className="hidden sm:flex items-center gap-2 p-2 hover:bg-gray-50 rounded-xl transition-colors text-gray-700"
               >
                 <div className="w-9 h-9 rounded-full bg-gray-100 flex items-center justify-center text-gray-600">
                   <User className="w-5 h-5" />
@@ -194,7 +194,7 @@ export default function Header() {
               {/* Cart Button with Count Badge */}
               <Link
                 to="/cart"
-                className="flex items-center gap-2.5 p-2 bg-brand-50 hover:bg-brand-100/80 rounded-xl transition-all border border-brand-200/60"
+                className="shrink-0 flex items-center gap-2.5 p-2 bg-brand-50 hover:bg-brand-100/80 rounded-xl transition-all border border-brand-200/60"
               >
                 <div className="relative">
                   <ShoppingCart className="w-6 h-6 text-brand-600" />
@@ -214,7 +214,7 @@ export default function Header() {
 
               {/* Mobile Hamburger Menu */}
               <button
-                className="md:hidden p-2 rounded-xl text-gray-700 hover:bg-gray-100 transition-colors"
+                className="md:hidden shrink-0 min-w-10 min-h-10 p-2 rounded-xl text-gray-700 hover:bg-gray-100 transition-colors"
                 onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
                 aria-label="Toggle navigation menu"
               >

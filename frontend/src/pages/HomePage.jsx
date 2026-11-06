@@ -75,6 +75,9 @@ const HERO_SLIDES = [
 export default function HomePage() {
   const [categories, setCategories] = useState(DEFAULT_CATEGORIES);
   const [products, setProducts] = useState([]);
+  const [productPage, setProductPage] = useState(1);
+  const [productPagination, setProductPagination] = useState({ total: 0, totalPages: 0 });
+  const [loadingMoreProducts, setLoadingMoreProducts] = useState(false);
   const [reviews, setReviews] = useState([]);
   const [loading, setLoading] = useState(true);
   const [currentSlide, setCurrentSlide] = useState(0);
@@ -124,7 +127,7 @@ export default function HomePage() {
       try {
         const [categoriesData, productsData, reviewsData] = await Promise.all([
           api.getCategories(),
-          api.getProducts('', search),
+          api.getProducts('', search, 1, 24),
           api.getReviews(),
         ]);
 
@@ -134,6 +137,8 @@ export default function HomePage() {
         if (productsData) {
           const list = Array.isArray(productsData) ? productsData : (productsData.products || []);
           setProducts(list);
+          setProductPage(1);
+          setProductPagination(productsData.pagination || { total: list.length, totalPages: 1 });
         }
         if (reviewsData) {
           setReviews(reviewsData);
@@ -147,6 +152,22 @@ export default function HomePage() {
 
     fetchData();
   }, [search]);
+
+  const loadMoreProducts = async () => {
+    const nextPage = productPage + 1;
+    setLoadingMoreProducts(true);
+    try {
+      const data = await api.getProducts('', search, nextPage, 24);
+      const nextProducts = Array.isArray(data) ? data : (data.products || []);
+      setProducts((current) => [...current, ...nextProducts]);
+      setProductPage(nextPage);
+      if (data.pagination) setProductPagination(data.pagination);
+    } catch (error) {
+      console.error('Error loading more products:', error);
+    } finally {
+      setLoadingMoreProducts(false);
+    }
+  };
 
   // Newsletter submit
   const handleNewsletterSubmit = async (e) => {
@@ -356,8 +377,8 @@ export default function HomePage() {
                   <Truck className="w-4 h-4 sm:w-5 sm:h-5" />
                 </div>
                 <div>
-                  <h3 className="font-extrabold text-[11px] sm:text-xs text-gray-900 uppercase tracking-wide">Same-Day Dispatch</h3>
-                  <p className="text-[10px] sm:text-[11px] text-gray-500 mt-0.5 line-clamp-2">Within Kakamega & MMUST.</p>
+                  <h3 className="font-extrabold text-[11px] sm:text-xs text-gray-900 uppercase tracking-wide">Fast Delivery</h3>
+                  <p className="text-[10px] sm:text-[11px] text-gray-500 mt-0.5 line-clamp-2">Sunday-Friday in Kakamega & MMUST.</p>
                   <span className="text-[9px] sm:text-[10px] text-blue-600 font-extrabold mt-0.5 inline-block">Kakamega Town</span>
                 </div>
               </div>
@@ -493,7 +514,7 @@ export default function HomePage() {
                 </div>
               </div>
               <span className="text-xs font-bold text-gray-400">
-                {products.length} Items Available
+                {productPagination.total} Items Available
               </span>
             </div>
 
@@ -506,6 +527,18 @@ export default function HomePage() {
                 {products.map((product) => (
                   <ProductCard key={product.id} product={product} />
                 ))}
+              </div>
+            )}
+            {!loading && productPage < productPagination.totalPages && (
+              <div className="flex justify-center">
+                <button
+                  type="button"
+                  onClick={loadMoreProducts}
+                  disabled={loadingMoreProducts}
+                  className="px-5 py-2.5 rounded-xl border border-gray-200 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                >
+                  {loadingMoreProducts ? 'Loading products...' : 'Load more products'}
+                </button>
               </div>
             )}
           </section>
