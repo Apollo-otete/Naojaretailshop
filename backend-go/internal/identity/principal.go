@@ -1,6 +1,9 @@
 package identity
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 // Principal is who a request is coming from, as the rest of the system needs to know it: the
 // account, the roles it holds, and the permissions that follow from them.
@@ -25,6 +28,11 @@ type Principal struct {
 	// SessionID is which session carried this principal, not who the principal is. Logout has
 	// to revoke one row rather than every row an account happens to have open elsewhere.
 	SessionID int64
+
+	// ExpiresAt is that session's current deadline, and the contract's Session.expires_at is
+	// rendered from it. It is a snapshot of the row the request just read and refreshed, so it
+	// answers "how long has this cookie got" without a second read of the sessions table.
+	ExpiresAt time.Time
 
 	// CSRFToken travels with the principal because it belongs to the session that carried it,
 	// and the two things that need it are both transport answers: GET /auth/session hands it

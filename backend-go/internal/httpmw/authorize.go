@@ -2,10 +2,13 @@ package httpmw
 
 import (
 	"log/slog"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/apierr"
 	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/httpjson"
+	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/identity"
 	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/port"
 )
 
@@ -27,6 +30,42 @@ import (
 func Authorize(l *slog.Logger, a port.Authorizer, permissions ...string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if err := a.Authorize(c.Request.Context(), port.Request{Permissions: permissions}); err != nil {
+			httpjson.Fail(c, l, err)
+			return
+		}
+		c.Next()
+	}
+}
+
+// OwnAccount is the resource type for a `[own]` rule whose resource is the caller's own record,
+// so an operation like POST /auth/password/change can be authorised through the same evaluator as
+// one whose ownership lives in a row. It is a port.Resource.Type, and the contract's matrix writes
+// the same idea as `[own]`.
+const OwnAccount = "account"
+
+// AuthorizeOwnAccount guards an operation whose resource *is* the principal: there is no id in the
+// request to check against, and the only owner is whoever is signed in.
+//
+// Authorize cannot serve these. identity.account.update carries owner_is_caller (ADR-024), so
+// handing it a request with no resource would return a 500 by design — and the resource here is
+// knowable at the middleware, because it is the caller. OwnerID is set to the caller's own id
+// rather than left zero: a zero owner means "nothing owns this", and the condition refuses that, so
+// copying the id from the principal is what states the rule honestly — the account being changed is
+// the one carried by the session, which is the whole reason the contract says there is no path from
+// this operation to another user's password.
+func AuthorizeOwnAccount(l *slog.Logger, a port.Authorizer, permissions ...string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		caller, ok := identity.PrincipalFrom(c.Request.Context())
+		if !ok {
+			httpjson.Write(c, l, apierr.Unauthorized("Sign in to change a password."))
+			return
+		}
+		me := caller.UserID()
+		req := port.Request{
+			Permissions: permissions,
+			Resource:    port.Resource{Type: OwnAccount, ID: strconv.FormatInt(me, 10), OwnerID: me},
+		}
+		if err := a.Authorize(c.Request.Context(), req); err != nil {
 			httpjson.Fail(c, l, err)
 			return
 		}

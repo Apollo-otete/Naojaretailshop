@@ -11,8 +11,9 @@ connection, migrations, and test harness"* — is complete against its Phase 2 e
 Work is now on **step 6** (*"Build identity/RBAC and catalogue as the first vertical slices, with
 tests and a usable frontend integration"*), whose Phase 3 exit criterion is *"Role lifecycle and
 authorization tests pass"*. The identity half exists — the schema, the Argon2id and session rules,
-the RBAC evaluator and its ownership conditions, and the middleware chain that applies them. The
-contract's `/auth` endpoints and the catalogue slice do not. See *Deliberate state* below.
+the RBAC evaluator and its ownership conditions, the middleware chain that applies them, and the
+contract's five `/auth` operations on top of it. The catalogue slice and the role-boundary tests
+(matrix B1–B14) do not. See *Deliberate state* below.
 
 Both criteria are checkable here:
 
@@ -38,6 +39,17 @@ curl -s localhost:8080/readyz
 `make help` lists every target. The two that matter for a review are `check` (what CI runs) and
 `test-integration` (destructive; it only connects to a database whose name ends in `_test`).
 
+Once it is running, the identity slice is exercisable by hand:
+
+```bash
+curl -si -X POST localhost:8080/api/v1/auth/register -H 'Content-Type: application/json' \
+  -d '{"full_name":"Achieng Otieno","email":"a@mail.test","phone":"0712345678",
+       "password":"correct horse battery staple"}'
+# 201, a Set-Cookie carrying the session, and a Session body: the roles and 20 effective
+# permissions the seeded customer role grants, the 15 of them that are ownership-scoped, and the
+# csrf_token every unsafe method must then send in X-CSRF-Token.
+```
+
 **Toolchain:** Go 1.22.2, pinned via `GOTOOLCHAIN=local` in the Makefile. `go get` will otherwise
 rewrite the `go` directive to a version this repository does not build against — a dependency
 already demands 1.25 and that is not a decision to take implicitly.
@@ -55,6 +67,7 @@ internal/apierr/  the single vocabulary of failures — no HTTP or database impo
 internal/httpjson/   the only code that writes a response body
 internal/httpmw/  request id, access log, recovery, CORS, session read, CSRF, authorisation
 internal/port/    the interfaces (Checker, Authorizer) adapters implement — imports no Gin
+internal/httpauth/  the /auth routes — request reading and error mapping, no rules
 internal/authz/   the RBAC evaluator and the attribute-condition registry (ADR-024)
 internal/database/    pgx pool + golang-migrate over embedded SQL
 internal/server/  engine assembly and the health endpoints
@@ -95,29 +108,43 @@ trusting a checklist.
 | Every schema change is reversible (§16) | `migrator.DownAll`, paired `.down.sql` | `TestMigrationsRunUpAndBackDownAgainstPostgres`, `TestEveryUpHasItsDownAndViceVersa` |
 | Money is integer cents (ADR-021) | `migrations/sql` CHECKs | `TestMoneyColumnsAreIntegers` |
 | Unratified business terms cannot read as approved | `system_settings.ratified` | `TestUnratifiedSeedsAreMarkedAsPlaceholders`, `TestMigrationsRunUpAndBackDownAgainstPostgres` |
+| A failed login never says whether the account exists (matrix C1) | `identity.ErrInvalidCredentials` covers absence, wrong password, suspension and deactivation | `TestLoginFailuresDoNotDiscloseTheAccountState` |
+| A password reaches neither response body nor log (§10) | `httpauth` renders `Session`, never the input; `decode` refuses to echo a parse error | `TestThePasswordNeverComesBack`, `TestRegisterRefusesAJunkBodyWithoutEchoingIt` |
+| Logout is idempotent and leaks no session state (contract `/auth/logout`) | `httpauth.logout` answers 204 with or without a principal | `TestLogoutWithADeadOrAbsentCookieStillSucceeds` |
+| The cookie one route issues is the value the next route reads | `httpcookie` + `httpmw.Authenticate` + `httpauth.Mount` | `TestTheSessionOneRouteIssuesIsTheSessionTheNextRouteReads` |
+| Only the operations the contract documents are routed | `httpauth.Mount` | `TestTheMountedOperationsAreExactlyTheContractedOnes` |
 
 ---
 
-## Deliberate state: the authority exists, the endpoints do not
+## Deliberate state: identity is reachable, nothing else is
 
-Authorisation is real: `cmd/api` wires `authz.RBAC` over the seeded catalogue, every route is
-behind `httpmw.Authenticate` and `httpmw.CSRF`, and there is no allow-stub anywhere in the tree.
-
-What is missing is a way to *get* a session: the contract's `/auth/register`, `/auth/login`,
-`/auth/logout`, `/auth/session` and `/auth/password/change` handlers are the next step, and until
-they exist no request can carry a cookie that `Authenticate` will accept. The use cases behind
-them are already written and tested (`internal/identity`), so those endpoints are thin.
+Authorisation is real and it is now reachable: `cmd/api` wires `authz.RBAC` over the seeded
+catalogue, every route is behind `httpmw.Authenticate` and `httpmw.CSRF`, and the contract's five
+`/auth` operations answer on `/api/v1`. Register or log in against a running service and the cookie
+that comes back works on every protected route, so the whole authentication path can be exercised
+end to end rather than only in unit tests.
 
 An allow-stub would have made the skeleton "work" and is exactly how an unauthenticated endpoint
 ships by accident; DenyAll was its safe version, and it was replaced rather than relaxed.
 
-Also not present, on purpose: any business endpoint from the contract, the per-address login rate
-limiter (ADR-019's other half — matrix B14 and §10 name it, and it needs `system_settings`
-thresholds to be worth writing), the breached-password-list check `contracts/openapi.yaml`
-requires for registration (no ADR covers which provider answers it), a request body size limit,
-`pgx`-generated queries (`sqlc` arrives with the first real repository), the Daraja adapter, and
-background jobs. Migration-on-boot is **off** by default (`AUTO_MIGRATE=false`); schema changes
-belong to the deploy step, where a human can take a backup first.
+Also not present, on purpose:
+
+- **Every business endpoint from the contract.** Catalogue, cart, checkout, orders and payments are
+  the next slices, and `/auth/register`'s promise that "the guest cart held by this browser is
+  merged into the new account's cart" waits on the cart one.
+- **The 429 that `/auth/register` and `/auth/login` document.** The per-account half of ADR-019's
+  login limiting is implemented and enforced (five failures, then 423); the per-**address** half is
+  not, so one attacker moving between addresses gets five guesses per account rather than five per
+  IP. Matrix B14 and §10 name it, and it needs `system_settings` thresholds to be worth writing.
+- **The breached-password-list check** registration's contract text asks for. No ADR decides which
+  provider answers it, and guessing one would put a third-party call inside account creation.
+- **A request body size limit.** Every `/auth` handler decodes the body it is given, so an oversized
+  one is a real cost. `MaxMultipartHeaderBytes` covers headers and nothing covers this.
+- `pgx`-generated queries (`sqlc` arrives with the first real repository), the Daraja adapter, and
+  background jobs.
+
+Migration-on-boot is **off** by default (`AUTO_MIGRATE=false`); schema changes belong to the deploy
+step, where a human can take a backup first.
 
 ---
 

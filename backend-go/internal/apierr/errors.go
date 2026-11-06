@@ -38,6 +38,14 @@ const (
 	CodeRateLimited            Code = "RATE_LIMITED"
 	CodeProviderUnavailable    Code = "PROVIDER_UNAVAILABLE"
 	CodeInternal               Code = "INTERNAL_ERROR"
+
+	// CodeBadRequest and CodeAccountLocked are not in the contract's original known-value list,
+	// which named a 400 response (components.responses.BadRequest: "bad JSON, unknown
+	// parameter") and a 423 lockout response without giving either a code to switch on. Every
+	// Error body requires one, so the list was completed rather than an existing code bent to
+	// cover a case it does not describe.
+	CodeBadRequest    Code = "BAD_REQUEST"
+	CodeAccountLocked Code = "ACCOUNT_LOCKED"
 )
 
 // Detail is one field- or entity-level explanation. The extra keys mirror the contract's
@@ -90,6 +98,15 @@ func AsFailure(err error) Failure {
 // New builds a Failure. Prefer the named helpers below for anything a client can trigger.
 func New(status int, code Code, msg string, details ...Detail) Failure {
 	return Failure{Status: status, Code: code, Message: msg, Details: details}
+}
+
+// BadRequest is for a request that could not be read at all — malformed JSON, a body where none
+// was expected. It is distinct from Validation, which is for a request that was read and then
+// refused: the client fixes the first by sending well-formed JSON and the second by sending
+// different values, and a single code for both would make the response less useful than the
+// request.
+func BadRequest(msg string) Failure {
+	return Failure{Status: http.StatusBadRequest, Code: CodeBadRequest, Message: msg}
 }
 
 func Unauthorized(msg string) Failure {

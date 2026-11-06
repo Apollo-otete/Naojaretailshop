@@ -144,9 +144,9 @@ func TestEveryCodeHasADistinctWireValue(t *testing.T) {
 		CodeOverrideReasonRequired: true, CodeMethodConflict: true, CodeIdempotencyConflict: true,
 		CodePriceChangeNotAllowed: true, CodeProductHasHistory: true,
 		CodePaymentAlreadySettled: true, CodeRateLimited: true, CodeProviderUnavailable: true,
-		CodeInternal: true,
+		CodeInternal: true, CodeBadRequest: true, CodeAccountLocked: true,
 	}
-	if len(seen) != 18 {
-		t.Fatalf("expected 18 distinct codes, got %d — a constant was duplicated", len(seen))
+	if len(seen) != 20 {
+		t.Fatalf("expected 20 distinct codes, got %d — a constant was duplicated", len(seen))
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -603,11 +604,219 @@ func (c *countingSessions) Authenticate(context.Context, string) (identity.Princ
 }
 
 // engine fails the test on the wiring error New returns, which is the point of it returning one.
+// The identity service it defaults to is a refusal, not a fake: these tests exercise the chain, and
+// one that reaches an /auth handler has done something it should not have.
 func engine(t *testing.T, d Deps) *gin.Engine {
 	t.Helper()
+	if d.Identity == nil {
+		d.Identity = unexpectedIdentity{}
+	}
 	r, err := New(d)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
 	return r
+}
+
+type unexpectedIdentity struct{}
+
+func (unexpectedIdentity) Register(context.Context, identity.RegisterInput) (identity.Authenticated, error) {
+	return identity.Authenticated{}, errors.New("server chain test reached /auth/register")
+}
+
+func (unexpectedIdentity) Login(context.Context, identity.LoginInput) (identity.Authenticated, error) {
+	return identity.Authenticated{}, errors.New("server chain test reached /auth/login")
+}
+
+func (unexpectedIdentity) Logout(context.Context, identity.Principal) error {
+	return errors.New("server chain test reached /auth/logout")
+}
+
+func (unexpectedIdentity) ChangePassword(context.Context, identity.Principal, string, string) error {
+	return errors.New("server chain test reached /auth/password/change")
+}
+
+// ── The identity slice, end to end ──────────────────────────────────────────────────────────
+//
+// Everything above tests a layer on its own. This test is the claim that only the assembled
+// service can make: the cookie /auth/register hands out is the value the authentication middleware
+// reads back, the principal it produces is the one the evaluator authorises, and the CSRF token in
+// the session body is the one the next unsafe request has to present. Each of those links is a
+// place where a correctly-tested component can still add up to a client that cannot sign in.
+
+type cookieSessions struct {
+	// read records the token the middleware asked about, which is what gets compared against the
+	// cookie the response set.
+	read   string
+	caller identity.Principal
+}
+
+func (c *cookieSessions) Authenticate(_ context.Context, token string) (identity.Principal, error) {
+	c.read = token
+	if token != "live-session-token" {
+		return identity.Principal{}, identity.ErrSessionNotFound
+	}
+	return c.caller, nil
+}
+
+type authStub struct {
+	caller      identity.Principal
+	token       string
+	loggedOut   int
+	passwordSet string
+}
+
+func (a *authStub) Register(context.Context, identity.RegisterInput) (identity.Authenticated, error) {
+	return a.signedIn(), nil
+}
+
+func (a *authStub) Login(context.Context, identity.LoginInput) (identity.Authenticated, error) {
+	return a.signedIn(), nil
+}
+
+func (a *authStub) signedIn() identity.Authenticated {
+	return identity.Authenticated{
+		Session:   identity.Session{ID: 7, Token: a.token, ExpiresAt: time.Now().Add(time.Hour)},
+		Principal: a.caller,
+	}
+}
+
+func (a *authStub) Logout(_ context.Context, p identity.Principal) error {
+	a.loggedOut++
+	if p.SessionID != a.caller.SessionID {
+		return fmt.Errorf("logout was asked to revoke session %d, not %d", p.SessionID, a.caller.SessionID)
+	}
+	return nil
+}
+
+func (a *authStub) ChangePassword(_ context.Context, p identity.Principal, _, next string) error {
+	if p.SessionID != a.caller.SessionID {
+		return errors.New("the principal reaching the password change is not the one that signed in")
+	}
+	a.passwordSet = next
+	return nil
+}
+
+func postJSON(t *testing.T, r *gin.Engine, path, body string, header http.Header) (*http.Response, string) {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	for k, vs := range header {
+		for _, v := range vs {
+			req.Header.Add(k, v)
+		}
+	}
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+
+	resp := rec.Result()
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	return resp, string(raw)
+}
+
+const registerBody = `{"full_name":"Achieng' Otieno","email":"achieng.example@mail.test","phone":"0712345678","password":"correct horse battery staple"}`
+
+func TestTheSessionOneRouteIssuesIsTheSessionTheNextRouteReads(t *testing.T) {
+	l, _ := testhelper.Logger(t, slog.LevelDebug)
+
+	caller := identity.Principal{
+		User: identity.User{
+			ID: 42, FullName: "Achieng' Otieno",
+			Email: "achieng.example@mail.test", Phone: "+254712345678",
+			Account: identity.KindCustomer, IsActive: true,
+		},
+		SessionID:   7,
+		CSRFToken:   "csrf-from-this-session",
+		Roles:       []string{"customer"},
+		Permissions: []string{"identity.account.update", "shopping.cart.read"},
+		Conditions:  map[string][]string{"identity.account.update": {authz.ConditionOwnerIsCaller}},
+	}
+	sessions := &cookieSessions{caller: caller}
+	stub := &authStub{caller: caller, token: "live-session-token"}
+
+	r := engine(t, Deps{
+		Logger: l, Cfg: testCfg("development"),
+		Authorizer: authz.RBAC{Logger: l},
+		Sessions:   sessions,
+		Identity:   stub,
+		Version:    "t",
+	})
+
+	resp, body := postJSON(t, r, "/api/v1/auth/register", registerBody, nil)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("register: %d, want 201 — %s", resp.StatusCode, body)
+	}
+
+	var issued []*http.Cookie
+	for _, c := range resp.Cookies() {
+		if c.Name == "naoja_session" {
+			issued = append(issued, c)
+		}
+	}
+	if len(issued) != 1 || issued[0].Value != "live-session-token" {
+		t.Fatalf("register did not set the session cookie it minted: %v", resp.Cookies())
+	}
+	if !issued[0].HttpOnly {
+		t.Error("the issued cookie is not HttpOnly")
+	}
+
+	// register's response is the Session the new cookie authenticates, so the CSRF token a client
+	// needs for its next unsafe call is already in this body.
+	var session struct {
+		CSRFToken   string   `json:"csrf_token"`
+		Permissions []string `json:"permissions"`
+	}
+	if err := json.Unmarshal([]byte(body), &session); err != nil {
+		t.Fatal(err)
+	}
+	if session.CSRFToken != "csrf-from-this-session" {
+		t.Fatalf("register reported csrf_token %q, want the one the session carries", session.CSRFToken)
+	}
+
+	withCookie := http.Header{}
+	withCookie.Add("Cookie", "naoja_session=live-session-token")
+
+	resp, body = get(t, r, "/api/v1/auth/session", withCookie)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("session read with a fresh cookie: %d, want 200 — %s", resp.StatusCode, body)
+	}
+	if sessions.read != "live-session-token" {
+		t.Errorf("the middleware looked up %q, not the cookie the client was handed", sessions.read)
+	}
+
+	// An unsafe method with the cookie but no proof of intent is the cross-site request the CSRF
+	// check exists for, and this is the ordering claim: the middleware cannot compare a token it has
+	// not been given yet.
+	resp, body = postJSON(t, r, "/api/v1/auth/logout", "", withCookie)
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("logout without the CSRF header: %d, want 401 — %s", resp.StatusCode, body)
+	}
+	if stub.loggedOut != 0 {
+		t.Error("a request the CSRF check refused still reached the use case")
+	}
+
+	withCSRF := http.Header{}
+	withCSRF.Add("Cookie", "naoja_session=live-session-token")
+	withCSRF.Add(identity.CSRFHeaderName, "csrf-from-this-session")
+
+	resp, body = postJSON(t, r, "/api/v1/auth/password/change",
+		`{"current_password":"correct horse battery staple","new_password":"a longer new secret"}`, withCSRF)
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("password change: %d, want 204 — %s", resp.StatusCode, body)
+	}
+	if stub.passwordSet != "a longer new secret" {
+		t.Errorf("the new password did not reach the use case: %q", stub.passwordSet)
+	}
+
+	resp, body = postJSON(t, r, "/api/v1/auth/logout", "", withCSRF)
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("logout: %d, want 204 — %s", resp.StatusCode, body)
+	}
+	if stub.loggedOut != 1 {
+		t.Errorf("logout reached the use case %d times, want once", stub.loggedOut)
+	}
 }

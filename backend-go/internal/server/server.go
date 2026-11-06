@@ -14,6 +14,7 @@ import (
 
 	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/apierr"
 	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/config"
+	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/httpauth"
 	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/httpcookie"
 	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/httpjson"
 	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/httpmw"
@@ -36,7 +37,14 @@ type Deps struct {
 	// whole service rather than of one route because the contract declares sessionCookie at
 	// the top level: there is no operation whose authorization answer may depend on a cookie
 	// nobody looked at.
-	Sessions  httpmw.Sessions
+	Sessions httpmw.Sessions
+
+	// Identity is the use-case surface behind the /auth operations. It is mounted here rather
+	// than by the composition root so that the middleware ordering below — authentication and
+	// CSRF ahead of every business route — is assembled in one place and cannot be recreated
+	// wrongly somewhere else.
+	Identity httpauth.Service
+
 	Checkers  []port.Checker
 	Version   string
 	StartedAt time.Time
@@ -51,6 +59,9 @@ func New(d Deps) (*gin.Engine, error) {
 	}
 	if d.Sessions == nil {
 		return nil, fmt.Errorf("%w: Sessions — without the cookie read nothing reaches a handler with a principal, and the authorizer can only say no", ErrMissingDependency)
+	}
+	if d.Identity == nil {
+		return nil, fmt.Errorf("%w: Identity — the contract's /auth operations would be registered against nothing, and there would be no way to obtain the session every other route requires", ErrMissingDependency)
 	}
 	if d.Logger == nil {
 		d.Logger = slog.Default()
@@ -101,6 +112,18 @@ func New(d Deps) (*gin.Engine, error) {
 	}
 	r.Use(httpmw.Authenticate(d.Logger, d.Sessions, cookie))
 	r.Use(httpmw.CSRF(d.Logger))
+
+	// The /api/v1 group is created here, after both Use calls, and that is the same mechanism as
+	// the health note above: Group copies the middleware chain as it stands, so a group made
+	// earlier would be served without authentication. The version prefix is the contract's
+	// `servers` block (§11's "versioned REST under /api/v1"), stated once.
+	api := r.Group("/api/v1")
+	httpauth.Mount(api, httpauth.Deps{
+		Identity:   d.Identity,
+		Authorizer: d.Authorizer,
+		Logger:     d.Logger,
+		Cookie:     cookie,
+	})
 
 	// Unmatched routes get the contract envelope. Gin's default is a plain-text "404 page not
 	// found", which any client that parses errors has to special-case — and a body that only

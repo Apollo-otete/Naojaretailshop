@@ -114,6 +114,11 @@ func run() error {
 		// declares sessionCookie at the top level, and B11's "fails on the next request" is only
 		// true if the next request is the one that reads the row.
 		Sessions: ident,
+
+		// The same service behind both: the routes that issue a session and the middleware that
+		// reads one must be answering to one implementation, or a login and a request could
+		// disagree about what the same cookie means.
+		Identity: ident,
 	}
 
 	handler, err := server.New(deps)

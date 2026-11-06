@@ -278,6 +278,11 @@ func (s *Service) Authenticate(ctx context.Context, token string) (Principal, er
 		s.d.Logger.Warn("could not record session activity",
 			slog.Int64("session_id", session.ID), slog.String("error", err.Error()))
 	}
+	// Touch does not mutate, and here the row has just been written, so this copy now describes
+	// the session as the store holds it. GET /auth/session reports expires_at from it; a
+	// principal carrying the pre-request expiry would answer "when does this cookie stop working"
+	// with a value the request itself just moved.
+	session.ExpiresAt = expires
 
 	grants, err := s.d.Grants.GrantsFor(ctx, user.ID)
 	if err != nil {
@@ -397,6 +402,7 @@ func principalOf(user User, session Session, grants Grants) Principal {
 	return Principal{
 		User:        user,
 		SessionID:   session.ID,
+		ExpiresAt:   session.ExpiresAt,
 		CSRFToken:   session.CSRFToken,
 		Roles:       grants.Roles,
 		Permissions: grants.Permissions,

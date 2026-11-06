@@ -139,6 +139,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Session'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '409':
           $ref: '#/components/responses/Conflict'
         '422':
@@ -180,10 +182,16 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Session'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthenticated'
         '423':
-          description: Account temporarily locked after repeated failures.
+          description: |
+            Account temporarily locked after repeated failures. `ACCOUNT_LOCKED`, which is the
+            client's cue to stop retrying this account — the per-account lockout is ADR-019's
+            half that a rate limit cannot substitute for, because rotating addresses would
+            otherwise reset it for free.
           content:
             application/json:
               schema:
@@ -265,6 +273,8 @@ paths:
       responses:
         '204':
           description: Password changed; other sessions revoked.
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthenticated'
         '403':
@@ -1640,6 +1650,16 @@ components:
             `METHOD_CONFLICT`, `IDEMPOTENCY_KEY_CONFLICT`, `PRICE_CHANGE_NOT_ALLOWED`,
             `PRODUCT_HAS_ORDER_HISTORY`, `PAYMENT_ALREADY_SETTLED`, `RATE_LIMITED`,
             `PROVIDER_UNAVAILABLE`, `INTERNAL_ERROR`.
+
+            Three more were named while step 6 was being built, because this component
+            requires a `code` on **every** error and the responses they belong to were already
+            documented without one: `CONFLICT` for the generic 409 this file describes but only
+            ever gave specific codes for (`STOCK_INSUFFICIENT`, `IDEMPOTENCY_KEY_CONFLICT`),
+            which is what an email or phone already registered on `/auth/register` is;
+            `BAD_REQUEST` for `BadRequest`, whose own description says "bad JSON" while no
+            operation referencing it had a code to return; and `ACCOUNT_LOCKED` for the 423 on
+            `/auth/login`, which is not a wrong password and not a rate limit, and a client has
+            to stop retrying when it sees it.
         message: { type: string }
         details:
           type: array
