@@ -105,19 +105,25 @@ func run(args []string) error {
 			return err
 		}
 		fmt.Printf("current version: %d (dirty=%t)\n", version, dirty)
-		if dirty {
-			fmt.Println("a migration failed part-way; inspect it, then `migrate -yes force <version>` only if the database is in the state that migration's up SQL leaves behind")
-		}
 		pending, err := m.Pending()
 		if err != nil {
 			return err
 		}
 		if len(pending) == 0 {
 			fmt.Println("database is at the latest migration")
-			return nil
+		} else {
+			fmt.Printf("pending: %v\n", pending)
 		}
-		fmt.Printf("pending: %v\n", pending)
-		return fmt.Errorf("%d migration(s) not yet applied", len(pending))
+		// A dirty database exits non-zero even when nothing is pending: `make migrate-status`
+		// is what a deploy checks, and "half of version 3 ran" is not a pass.
+		if dirty {
+			return fmt.Errorf("version %d is dirty — a migration failed part-way; inspect it, then run `migrate -yes force %d` only if the schema is in the state that migration's up SQL leaves behind",
+				version, version-1)
+		}
+		if len(pending) > 0 {
+			return fmt.Errorf("%d migration(s) not yet applied", len(pending))
+		}
+		return nil
 
 	case "force":
 		if !*yes {

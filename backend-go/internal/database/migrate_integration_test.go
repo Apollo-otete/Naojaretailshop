@@ -1,127 +1,48 @@
 //go:build integration
 
-package database
+// This file is the external test package on purpose: the DSN rule that decides which database may
+// be destroyed lives in internal/dbtest, and dbtest imports this package to run the migrations.
+// An in-package test could not import it without a cycle, and the alternative — a second copy of
+// the safety rule — is the thing to avoid.
+package database_test
 
 import (
 	"context"
-	"log/slog"
-	"net/url"
-	"os"
-	"strings"
 	"testing"
-	"time"
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/observability"
+	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/database"
+	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/dbtest"
 )
 
 // The migration pipeline is only worth having if the up and the down are both proven against a
 // real server. Everything else in this repository's test suite runs without a database; this
 // file is the reason `make test-integration` exists as a separate target.
 //
-// It is destructive by design — `DownAll` drops nine schemas — so it refuses any connection
-// string that does not look like a scratch database.
+// It is destructive by design — `DownAll` drops nine schemas — which is why it shares dbtest's
+// scratch-database rule rather than inventing its own, and why `make test-integration` runs the
+// packages one at a time.
 
-// schemas mirrors docs/phase-1-domain-model-erd.md §4. If a migration adds a tenth, the ERD and
-// this list change together.
-var schemas = []string{
-	"identity", "catalogue", "commerce", "payments",
-	"inventory", "fulfilment", "engagement", "analytics", "administration",
-}
-
-// scratchDSN returns a connection string these tests may destroy, or "" when there is none.
-//
-// Resolution order, and why: MIGRATION_TEST_DATABASE_URL exists for CI, which often puts
-// Postgres on a service host rather than a loopback address and would be refused by the
-// local-only rule below — the flag is the explicit override, not a loophole to widen the
-// heuristic. Failing that, a local container is offered on the conventional port, which lets
-// `make test-integration` work with no configuration at all.
-func scratchDSN(t *testing.T) string {
+func migrator(t *testing.T) *database.Migrator {
 	t.Helper()
-
-	if raw := os.Getenv("MIGRATION_TEST_DATABASE_URL"); raw != "" {
-		// Even an explicitly supplied URL has to name a scratch database.
-		requireScratchName(t, raw)
-		return raw
-	}
-	for _, candidate := range []string{
-		os.Getenv("DATABASE_URL"),
-		"postgres://naoja:naoja_dev_only@localhost:5433/naoja_test?sslmode=disable",
-		"postgres://naoja:naoja_dev_only@localhost:5432/naoja_test?sslmode=disable",
-		"postgres://postgres:postgres@localhost:5432/naoja_test?sslmode=disable",
-		"postgres://postgres@localhost:5432/naoja_test?sslmode=disable",
-	} {
-		if candidate == "" || !strings.HasSuffix(strings.Split(candidate, "?")[0], "_test") {
-			continue
-		}
-		conn, err := pgx.Connect(context.Background(), candidate)
-		if err != nil {
-			continue // not up, not reachable, wrong credentials — try the next one
-		}
-		_ = conn.Close(context.Background())
-		return candidate
-	}
-	return ""
+	return database.NewMigrator(dbtest.DSN(t), dbtest.Logger())
 }
 
-// These tests drop every schema they create, so a connection string that could point at
-// anything with real data in it is refused here rather than discovered at the worst moment.
-func requireScratchName(t *testing.T, raw string) {
+// reset tears the database down to nothing. A failure here almost always means the recorded
+// version is not in the embedded set — a hand-edited or half-forced database — and `make
+// db-reset` is the honest fix, so the message says so.
+func reset(t *testing.T, m *database.Migrator) {
 	t.Helper()
-	u, err := url.Parse(raw)
-	if err != nil {
-		t.Fatalf("MIGRATION_TEST_DATABASE_URL does not parse: %v", err)
+	if _, _, err := m.DownAll(); err != nil {
+		t.Fatalf("cannot reach an empty database: %v\n"+
+			"the recorded version is probably not in migrations/sql; run `make db-reset`", err)
 	}
-	if !strings.HasSuffix(strings.Trim(u.Path, "/"), "_test") {
-		t.Fatalf("refusing to run destructive migrations against database %q — its name must end in _test", u.Path)
-	}
-}
-
-var dsnOnce struct {
-	value string
-	done  bool
-}
-
-func dsn(t *testing.T) string {
-	t.Helper()
-	if !dsnOnce.done {
-		dsnOnce.value = scratchDSN(t)
-		dsnOnce.done = true
-	}
-	if dsnOnce.value == "" {
-		t.Skip("no reachable scratch database (one named *_test); run `make db-up` first")
-	}
-	return dsnOnce.value
-}
-
-func connect(t *testing.T) *pgx.Conn {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	conn, err := pgx.Connect(ctx, dsn(t))
-	if err != nil {
-		t.Fatalf("connecting to %s: %v", redact(dsn(t)), err)
-	}
-	t.Cleanup(func() { _ = conn.Close(context.Background()) })
-	return conn
-}
-
-func redact(raw string) string {
-	u, err := url.Parse(raw)
-	if err != nil || u.User == nil {
-		return "<unparseable>"
-	}
-	if _, ok := u.User.Password(); ok {
-		u.User = url.UserPassword(u.User.Username(), "REDACTED")
-	}
-	return u.String()
 }
 
 func TestMigrationsRunUpAndBackDownAgainstPostgres(t *testing.T) {
-	conn := connect(t)
-	m := NewMigrator(dsn(t), testLog())
+	conn := dbtest.Conn(t)
+	m := migrator(t)
 
 	ctx := context.Background()
 
@@ -195,14 +116,20 @@ func TestMigrationsRunUpAndBackDownAgainstPostgres(t *testing.T) {
 	if got := countTables(t, conn); got != 0 {
 		t.Errorf("%d tables survived a full rollback", got)
 	}
+
+	// Leaving the database empty would make every other integration package in this run migrate
+	// from nothing, which is correct but slow — and it means the next assertion in this file has
+	// a schema to assert against.
+	if _, _, err := m.Up(); err != nil {
+		t.Fatalf("restoring: %v", err)
+	}
 }
 
 // A single-step rollback is the operation a developer performs under pressure, so it has to be
 // exercised rather than assumed.
 func TestDownOneStepRollsBackExactlyOneMigration(t *testing.T) {
-	conn := connect(t)
-	m := NewMigrator(dsn(t), testLog())
-	ctx := context.Background()
+	conn := dbtest.Conn(t)
+	m := migrator(t)
 
 	reset(t, m)
 	if _, _, err := m.Up(); err != nil {
@@ -214,14 +141,15 @@ func TestDownOneStepRollsBackExactlyOneMigration(t *testing.T) {
 		t.Fatalf("down 1: %v", err)
 	}
 
-	var exists bool
-	if err := conn.QueryRow(ctx,
-		`SELECT EXISTS (SELECT 1 FROM information_schema.tables
-		 WHERE table_schema = 'administration' AND table_name = 'system_settings')`).Scan(&exists); err != nil {
-		t.Fatal(err)
+	head := tableExists(t, conn, "identity", "users")
+	if head {
+		t.Error("identity.users survived a one-step rollback of the head migration")
 	}
-	if exists {
-		t.Error("the last migration's table survived a one-step rollback")
+	// system_settings belongs to the migration below it, which was not rolled back. When a 0004
+	// lands this assertion is the one that starts failing, and the fix is to move both checks one
+	// migration forward rather than to delete them.
+	if !tableExists(t, conn, "administration", "system_settings") {
+		t.Error("a one-step rollback removed a table it did not own")
 	}
 	// The schemas belong to migration 0001, which was not rolled back.
 	assertSchemas(t, conn, true)
@@ -231,9 +159,20 @@ func TestDownOneStepRollsBackExactlyOneMigration(t *testing.T) {
 	}
 }
 
+func tableExists(t *testing.T, conn *pgx.Conn, schema, table string) bool {
+	t.Helper()
+	var exists bool
+	if err := conn.QueryRow(context.Background(),
+		`SELECT EXISTS (SELECT 1 FROM information_schema.tables
+		 WHERE table_schema = $1 AND table_name = $2)`, schema, table).Scan(&exists); err != nil {
+		t.Fatalf("checking %s.%s: %v", schema, table, err)
+	}
+	return exists
+}
+
 // A zero step count must not mean "everything".
 func TestDownRefusesANonPositiveStepCount(t *testing.T) {
-	m := NewMigrator(dsn(t), testLog())
+	m := migrator(t)
 	for _, steps := range []int{0, -1, -99} {
 		if _, _, err := m.Down(steps); err == nil {
 			t.Errorf("Down(%d) was accepted", steps)
@@ -241,25 +180,10 @@ func TestDownRefusesANonPositiveStepCount(t *testing.T) {
 	}
 }
 
-func testLog() *slog.Logger {
-	return observability.NewLogger(slog.LevelWarn)
-}
-
-// reset tears the database down to nothing. A failure here almost always means the recorded
-// version is not in the embedded set — a hand-edited or half-forced database — and `make
-// db-reset` is the honest fix, so the message says so.
-func reset(t *testing.T, m *Migrator) {
-	t.Helper()
-	if _, _, err := m.DownAll(); err != nil {
-		t.Fatalf("cannot reach an empty database: %v\n"+
-			"the recorded version is probably not in migrations/sql; run `make db-reset`", err)
-	}
-}
-
 func assertSchemas(t *testing.T, conn *pgx.Conn, want bool) {
 	t.Helper()
 	ctx := context.Background()
-	for _, s := range schemas {
+	for _, s := range dbtest.Schemas {
 		var exists bool
 		if err := conn.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = $1)`, s).Scan(&exists); err != nil {
 			t.Fatalf("checking schema %q: %v", s, err)
@@ -276,7 +200,7 @@ func countTables(t *testing.T, conn *pgx.Conn) int {
 	err := conn.QueryRow(context.Background(), `
 		SELECT count(*) FROM information_schema.tables
 		 WHERE table_schema = ANY($1::text[]) AND table_type = 'BASE TABLE'`,
-		schemas).Scan(&n)
+		dbtest.Schemas).Scan(&n)
 	if err != nil {
 		t.Fatalf("counting tables: %v", err)
 	}

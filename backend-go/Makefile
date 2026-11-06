@@ -63,7 +63,7 @@ INTEGRATION_DATABASE_URL ?= postgres://naoja:naoja_dev_only@localhost:5433/naoja
 
 .PHONY: test-integration
 test-integration: ## run tests that need a live PostgreSQL (see db-up)
-	MIGRATION_TEST_DATABASE_URL=$(INTEGRATION_DATABASE_URL) go test -tags=integration ./... -count=1
+	MIGRATION_TEST_DATABASE_URL=$(INTEGRATION_DATABASE_URL) go test -tags=integration -p 1 ./... -count=1
 
 .PHONY: cover
 cover: ## unit-test coverage profile + per-package totals
