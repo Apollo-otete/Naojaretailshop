@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
+	"math/rand"
 	"net/http"
 	"strconv"
 	"strings"
@@ -440,13 +442,117 @@ func legacyAdminDeleteCategory(d Deps) gin.HandlerFunc {
 
 func legacyCreateOrder(d Deps) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// The contract/v1 ordering flow is quote+idempotent placement from cart. The legacy frontend
-		// sends a full payload. Without a full guest-checkout translation we return a clear error
-		// rather than silently losing data; the v1 cart+order flow is the supported path.
-		_ = d
-		c.JSON(http.StatusNotImplemented, gin.H{"message": "Legacy direct checkout is not supported by the Go API. Please use the cart and /api/v1 checkout flow."})
+		// Compat for the existing frontend's direct checkout payload. The contract flow is
+		// cart → quote → idempotent placement; this translates the legacy shape into an order
+		// using the same store/tx primitives, without trusting client totals (we recompute from
+		// the submitted lines).
+		if d.LegacyOrderStore == nil || d.LegacyOrderTx == nil {
+			c.JSON(http.StatusNotImplemented, gin.H{"message": "Checkout is not available. Please use the cart and /api/v1 checkout flow."})
+			return
+		}
+		var in struct {
+			CustomerName     string  `json:"customer_name"`
+			CustomerPhone    string  `json:"customer_phone"`
+			CustomerEmail    string  `json:"customer_email"`
+			ShippingAddress  string  `json:"shipping_address"`
+			Notes            string  `json:"notes"`
+			PaymentMethod    string  `json:"payment_method"`
+			DeliveryFee      float64 `json:"delivery_fee"`
+			DeliveryFeeCents int64   `json:"delivery_fee_cents"`
+			Items            []struct {
+				ProductID   int64   `json:"product_id"`
+				ProductName string  `json:"product_name"`
+				SKU         string  `json:"sku"`
+				Quantity    int     `json:"quantity"`
+				UnitPrice   float64 `json:"unit_price"`
+				UnitCents   int64   `json:"unit_price_cents"`
+			} `json:"items"`
+		}
+		if err := legacyDecode(c, &in); err != nil {
+			httpjson.Fail(c, d.Logger, err)
+			return
+		}
+		if len(in.Items) == 0 {
+			c.JSON(http.StatusUnprocessableEntity, gin.H{"message": "An order needs at least one item."})
+			return
+		}
+
+		deliveryFeeCents := in.DeliveryFeeCents
+		if deliveryFeeCents == 0 && in.DeliveryFee > 0 {
+			deliveryFeeCents = int64(in.DeliveryFee*100 + 0.5)
+		}
+
+		now := time.Now().UTC()
+		order := ordering.Order{
+			Status:           ordering.StatusPendingPayment,
+			PaymentStatus:    ordering.PayPending,
+			Currency:         "KES",
+			DeliveryFeeCents: deliveryFeeCents,
+			Reference:        fmt.Sprintf("NJ-%d-%04d", now.Year(), rand.Intn(10000)),
+			ExpiresAt:        timePtr(now.Add(30 * time.Minute)),
+		}
+		if in.ShippingAddress != "" {
+			order.DeliveryAddress = &in.ShippingAddress
+		}
+		if in.CustomerPhone != "" {
+			order.ContactPhone = &in.CustomerPhone
+		}
+		if in.Notes != "" {
+			order.DeliveryInstructions = &in.Notes
+		}
+
+		// Associate with signed-in caller when present (Bearer session).
+		if h := c.GetHeader("Authorization"); strings.HasPrefix(h, "Bearer ") && d.Sessions != nil {
+			token := strings.TrimSpace(strings.TrimPrefix(h, "Bearer "))
+			if p, err := d.Sessions.Authenticate(c.Request.Context(), token); err == nil {
+				uid := p.UserID()
+				order.UserID = &uid
+			}
+		}
+
+		items := make([]ordering.OrderItem, 0, len(in.Items))
+		var subtotal int64
+		for _, it := range in.Items {
+			qty := it.Quantity
+			if qty < 1 {
+				qty = 1
+			}
+			unit := it.UnitCents
+			if unit == 0 && it.UnitPrice > 0 {
+				unit = int64(it.UnitPrice*100 + 0.5)
+			}
+			line := unit * int64(qty)
+			subtotal += line
+			pid := it.ProductID
+			items = append(items, ordering.OrderItem{
+				ProductID: &pid, ProductName: it.ProductName, SKU: it.SKU,
+				Quantity: qty, UnitPriceCents: unit, LineTotalCents: line,
+			})
+		}
+		order.SubtotalCents = subtotal
+		order.TotalCents = subtotal + deliveryFeeCents
+
+		err := d.LegacyOrderTx.RunInTx(c.Request.Context(), func(ctx context.Context) error {
+			if err := d.LegacyOrderStore.CreateOrder(ctx, &order); err != nil {
+				return err
+			}
+			for i := range items {
+				items[i].OrderID = order.ID
+				if err := d.LegacyOrderStore.AddOrderItem(ctx, &items[i]); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			httpjson.Fail(c, d.Logger, err)
+			return
+		}
+		c.JSON(http.StatusCreated, gin.H{"message": "Order placed successfully", "order": legacyOrderView(order, items)})
 	}
 }
+
+func timePtr(t time.Time) *time.Time { return &t }
 func legacyTrackOrder(d Deps) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if d.Ordering == nil {
@@ -553,7 +659,19 @@ func legacyOrderView(o ordering.Order, items []ordering.OrderItem) gin.H {
 		h["customer_phone"] = *o.ContactPhone
 	}
 	if items != nil {
-		h["items"] = items
+		its := make([]gin.H, 0, len(items))
+		for _, it := range items {
+			pid := int64(0)
+			if it.ProductID != nil {
+				pid = *it.ProductID
+			}
+			its = append(its, gin.H{
+				"id": it.ID, "product_id": pid, "product_name": it.ProductName,
+				"quantity": it.Quantity, "unit_price": float64(it.UnitPriceCents) / 100.0,
+				"total_price": float64(it.LineTotalCents) / 100.0,
+			})
+		}
+		h["items"] = its
 	}
 	return h
 }

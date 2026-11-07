@@ -22,6 +22,7 @@ import (
 	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/httpordering"
 	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/httpshopping"
 	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/observability"
+	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/ordering"
 	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/port"
 )
 
@@ -62,6 +63,11 @@ type Deps struct {
 
 	// Ordering is the use-case surface behind the /orders operations.
 	Ordering httpordering.Service
+
+	// Legacy compat: order store/tx for translating the existing frontend's checkout payload
+	// where the full cart/quote flow is not yet wired end-to-end. Optional.
+	LegacyOrderStore ordering.OrderStore
+	LegacyOrderTx    ordering.Transactor
 
 	Checkers  []port.Checker
 	Version   string
