@@ -34,6 +34,16 @@ type Config struct {
 
 	// Cloudinary configures image uploads. Optional when unset.
 	Cloudinary Cloudinary
+
+	// Email (e.g. Resend) for transactional messages. Optional when unset.
+	Email Email
+
+	// Pusher for realtime/in-app notifications. Optional when unset.
+	Pusher Pusher
+
+	// Public/Frontend URLs (used for links/callback composition). Optional.
+	FrontendURL   string
+	PublicBaseURL string
 }
 
 type Database struct {
@@ -105,6 +115,24 @@ type Cloudinary struct {
 
 func (c Cloudinary) Enabled() bool {
 	return strings.TrimSpace(c.CloudName) != "" && strings.TrimSpace(c.APIKey) != "" && strings.TrimSpace(c.APISecret) != ""
+}
+
+type Email struct {
+	Provider  string // e.g. resend
+	APIKey    string
+	FromEmail string
+	FromName  string
+}
+
+func (e Email) Enabled() bool { return strings.TrimSpace(e.APIKey) != "" }
+
+type Pusher struct {
+	InstanceID string
+	APIKey     string
+}
+
+func (p Pusher) Enabled() bool {
+	return strings.TrimSpace(p.APIKey) != "" || strings.TrimSpace(p.InstanceID) != ""
 }
 
 func (c Config) IsProduction() bool { return c.Env == "production" }
@@ -260,6 +288,18 @@ func Load() (Config, error) {
 		APIKey:    envStr("CLOUDINARY_API_KEY", ""),
 		APISecret: envStr("CLOUDINARY_API_SECRET", ""),
 	}
+	c.Email = Email{
+		Provider:  envStr("EMAIL_PROVIDER", "resend"),
+		APIKey:    envStr("RESEND_API_KEY", envStr("EMAIL_API_KEY", "")),
+		FromEmail: envStr("EMAIL_FROM", ""),
+		FromName:  envStr("EMAIL_FROM_NAME", "Naoja"),
+	}
+	c.Pusher = Pusher{
+		InstanceID: envStr("PUSHER_INSTANCE_ID", ""),
+		APIKey:     envStr("PUSHER_API_KEY", ""),
+	}
+	c.FrontendURL = envStr("FRONTEND_URL", "")
+	c.PublicBaseURL = envStr("PUBLIC_BASE_URL", "")
 
 	if c.Database.MinConns > c.Database.MaxConns {
 		return Config{}, fmt.Errorf("DB_MIN_CONNS (%d) cannot exceed DB_MAX_CONNS (%d)", c.Database.MinConns, c.Database.MaxConns)
