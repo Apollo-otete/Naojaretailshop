@@ -10,7 +10,7 @@
     "build:admin": "vite build --config vite.admin.config.js",
     "build:all": "npm run build && npm run build:admin",
     "preview": "vite preview",
-    "preview:admin": "vite preview --config vite.admin.config.js --host admin.naoja.local --port 5174"
+    "preview:admin": "vite preview --config vite.admin.config.js --host 127.0.0.1 --port 5174"
   },
   "dependencies": {
     "lucide-react": "^0.344.0",
