@@ -38,6 +38,10 @@ type Config struct {
 	SessionCookieName string
 
 	RequestIDTrust bool // accept an inbound X-Request-Id (only when behind a proxy we control)
+
+	// Mpesa configures the Daraja (M-Pesa) integration (P1). Optional: when disabled/unset the
+	// payments adapter is not wired and payment endpoints report unavailability.
+	Mpesa Mpesa
 }
 
 type Database struct {
@@ -78,6 +82,27 @@ type Login struct {
 	// so a deployment that changes one changes the other coherently.
 	RateLimit       int
 	RateLimitWindow time.Duration
+}
+
+// Mpesa holds Daraja integration settings. Secrets must come from the environment/secret store,
+// never from code or git. When Environment is empty or required fields are missing, the
+// integration is treated as disabled (safe default).
+type Mpesa struct {
+	Environment    string // sandbox | production
+	ConsumerKey    string
+	ConsumerSecret string
+	Shortcode      string
+	Passkey        string
+	CallbackURL    string
+}
+
+func (m Mpesa) Enabled() bool {
+	return strings.TrimSpace(m.Environment) != "" &&
+		strings.TrimSpace(m.ConsumerKey) != "" &&
+		strings.TrimSpace(m.ConsumerSecret) != "" &&
+		strings.TrimSpace(m.Shortcode) != "" &&
+		strings.TrimSpace(m.Passkey) != "" &&
+		strings.TrimSpace(m.CallbackURL) != ""
 }
 
 func (c Config) IsProduction() bool { return c.Env == "production" }
@@ -227,6 +252,8 @@ func Load() (Config, error) {
 		RateLimitWindow: envDuration("LOGIN_RATE_WINDOW", 15*time.Minute),
 	}
 
+	c.Mpesa = loadMpesa()
+
 	if c.Database.MinConns > c.Database.MaxConns {
 		return Config{}, fmt.Errorf("DB_MIN_CONNS (%d) cannot exceed DB_MAX_CONNS (%d)", c.Database.MinConns, c.Database.MaxConns)
 	}
@@ -234,6 +261,32 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 	return c, nil
+}
+
+func loadMpesa() Mpesa {
+	env := envStr("MPESA_ENV", envStr("ENVIRONMENT", ""))
+	if env == "" {
+		return Mpesa{}
+	}
+	prod := strings.EqualFold(env, "production") || strings.EqualFold(env, "prod")
+	if prod {
+		return Mpesa{
+			Environment:    "production",
+			ConsumerKey:    envStr("MPESA_CONSUMER_KEY_PROD", envStr("MPESA_CONSUMER_KEY", "")),
+			ConsumerSecret: envStr("MPESA_CONSUMER_SECRET_PROD", envStr("MPESA_CONSUMER_SECRET", "")),
+			Shortcode:      envStr("MPESA_SHORTCODE_PROD", envStr("MPESA_SHORTCODE", "")),
+			Passkey:        envStr("MPESA_PASSKEY_PROD", envStr("MPESA_PASSKEY", "")),
+			CallbackURL:    envStr("MPESA_CALLBACK_URL_PROD", envStr("MPESA_CALLBACK_URL", "")),
+		}
+	}
+	return Mpesa{
+		Environment:    "sandbox",
+		ConsumerKey:    envStr("MPESA_CONSUMER_KEY", ""),
+		ConsumerSecret: envStr("MPESA_CONSUMER_SECRET", ""),
+		Shortcode:      envStr("MPESA_SHORTCODE", ""),
+		Passkey:        envStr("MPESA_PASSKEY", ""),
+		CallbackURL:    envStr("MPESA_CALLBACK_URL", ""),
+	}
 }
 
 func envStr(key, fallback string) string {
