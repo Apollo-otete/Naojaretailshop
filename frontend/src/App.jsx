@@ -6,17 +6,8 @@ import ProductPage from './pages/ProductPage';
 import CartPage from './pages/CartPage.jsx';
 import CheckoutPage from './pages/CheckoutPage';
 import AccountPage from './pages/AccountPage';
-import AdminApp from './admin/AdminApp';
-
-function isAdminEntry() {
-  const p = window.location.pathname;
-  return p.startsWith('/admin') || p.startsWith('/console') || p.startsWith('/backoffice');
-}
 
 function App() {
-  if (isAdminEntry()) {
-    return <AdminApp />;
-  }
   return (
     <CartProvider>
       <BrowserRouter>

@@ -8,6 +8,7 @@ jspm_packages/
 
 # ── Build Outputs ─────────────────────────────────────────────
 dist/
+dist-admin/
 build/
 out/
 tmp/
