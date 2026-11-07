@@ -16,7 +16,7 @@ func valid() Config {
 		CORS:              CORS{AllowedOrigins: []string{"http://localhost:5173"}},
 		SessionCookieName: "naoja_session",
 		Session:           Session{Idle: 30 * time.Minute, AdminIdle: 15 * time.Minute, Absolute: 12 * time.Hour},
-		Login:             Login{MaxFailures: 5, Lockout: 15 * time.Minute},
+		Login:             Login{MaxFailures: 5, Lockout: 15 * time.Minute, RateLimit: 5, RateLimitWindow: 15 * time.Minute},
 	}
 }
 
@@ -97,6 +97,18 @@ func TestValidateRejectsEachInsecureOrAmbiguousValue(t *testing.T) {
 			name:   "login lockout disabled",
 			mutate: func(c *Config) { c.Login.MaxFailures = 0 },
 			want:   "LOGIN_MAX_FAILURES",
+		},
+		{
+			// The per-address half of ADR-019's login limiting is the ceiling that makes the
+			// per-account lockout meaningful for somebody rotating accounts.
+			name:   "login rate limit disabled",
+			mutate: func(c *Config) { c.Login.RateLimit = 0 },
+			want:   "LOGIN_RATE_LIMIT",
+		},
+		{
+			name:   "login rate window not positive",
+			mutate: func(c *Config) { c.Login.RateLimitWindow = 0 },
+			want:   "LOGIN_RATE_WINDOW",
 		},
 	}
 

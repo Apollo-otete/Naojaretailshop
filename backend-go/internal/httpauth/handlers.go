@@ -43,6 +43,11 @@ type Deps struct {
 	Authorizer port.Authorizer
 	Logger     *slog.Logger
 	Cookie     httpcookie.Session
+
+	// RateLimiter throttles the public auth operations per client address (ADR-019). Optional at
+	// the transport edge — a nil means the caller did not wire the auth surface — but the
+	// composition root always supplies one, so a deployment cannot quietly run an unwalled login.
+	RateLimiter *RateLimiter
 }
 
 // Mount registers the five contracted operations. The paths hang off the router the caller passes —
@@ -51,8 +56,13 @@ type Deps struct {
 func Mount(r gin.IRouter, d Deps) {
 	auth := r.Group("/auth")
 
-	auth.POST("/register", register(d))
-	auth.POST("/login", login(d))
+	// ADR-019's rate limiting: register and login are throttled per client address with a sliding
+	// window, answered 429 with Retry-After. The middleware is transport (which address the request
+	// came from) rather than a decision about credentials, so it sits ahead of the use cases and
+	// the use cases' own per-account lockout stays the second, finer-grained gate.
+	rateLimit := RateLimit(d.Logger, d.RateLimiter)
+	auth.POST("/register", rateLimit, register(d))
+	auth.POST("/login", rateLimit, login(d))
 
 	// Logout is deliberately not behind the authorizer. Contract: "calling it with an
 	// already-revoked cookie succeeds and does nothing, because reporting 'not signed in' here

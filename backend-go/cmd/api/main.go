@@ -23,6 +23,7 @@ import (
 	cataloguepg "github.com/Apollo-otete/Naojaretailshop/backend-go/internal/catalogue/postgres"
 	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/config"
 	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/database"
+	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/httpauth"
 	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/identity"
 	identitypg "github.com/Apollo-otete/Naojaretailshop/backend-go/internal/identity/postgres"
 	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/observability"
@@ -183,6 +184,11 @@ func run() error {
 		Catalogue: cat,
 		Shopping:  shop,
 		Ordering:  ord,
+
+		// ADR-019's per-address rate limit for the public auth operations, on the numbers the
+		// operator configured: enough attempts to stop a rotating attacker, few enough that a person
+		// who forgot their password is not locked out of their own account for the day.
+		AuthRateLimit: httpauth.NewRateLimiter(cfg.Login.RateLimit, cfg.Login.RateLimitWindow),
 	}
 
 	handler, err := server.New(deps)

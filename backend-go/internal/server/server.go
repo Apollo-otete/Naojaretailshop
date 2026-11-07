@@ -48,6 +48,12 @@ type Deps struct {
 	// wrongly somewhere else.
 	Identity httpauth.Service
 
+	// AuthRateLimit is ADR-019's per-address rate limit for the public auth operations (register,
+	// login). It is optional here — the engine-level tests build an engine without the full
+	// dependency graph — and the composition root always supplies it, so a deployment cannot run an
+	// unthrottled login.
+	AuthRateLimit *httpauth.RateLimiter
+
 	// Catalogue is the use-case surface behind the /products and /categories operations.
 	Catalogue httpcatalogue.Service
 
@@ -136,10 +142,11 @@ func New(d Deps) (*gin.Engine, error) {
 	// `servers` block (§11's "versioned REST under /api/v1"), stated once.
 	api := r.Group("/api/v1")
 	httpauth.Mount(api, httpauth.Deps{
-		Identity:   d.Identity,
-		Authorizer: d.Authorizer,
-		Logger:     d.Logger,
-		Cookie:     cookie,
+		Identity:    d.Identity,
+		Authorizer:  d.Authorizer,
+		Logger:      d.Logger,
+		Cookie:      cookie,
+		RateLimiter: d.AuthRateLimit,
 	})
 
 	if catalogueSvc != nil {

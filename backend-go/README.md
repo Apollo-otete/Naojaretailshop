@@ -116,6 +116,7 @@ trusting a checklist.
 | Logout is idempotent and leaks no session state (contract `/auth/logout`) | `httpauth.logout` answers 204 with or without a principal | `TestLogoutWithADeadOrAbsentCookieStillSucceeds` |
 | The cookie one route issues is the value the next route reads | `httpcookie` + `httpmw.Authenticate` + `httpauth.Mount` | `TestTheSessionOneRouteIssuesIsTheSessionTheNextRouteReads` |
 | Only the operations the contract documents are routed | `httpauth.Mount` | `TestTheMountedOperationsAreExactlyTheContractedOnes` |
+| The public auth operations are throttled per client address | `httpauth.RateLimit`, `httpauth.RateLimiter` | `TestLoginAnswers429WhenThePerAddressLimitIsExceeded`, `TestRegisterIsThrottledPerAddress` |
 
 ---
 
@@ -135,10 +136,6 @@ Also not present, on purpose:
 - **Every business endpoint from the contract.** Cart, checkout, orders and payments are the next
   slices, and `/auth/register`'s promise that "the guest cart held by this browser is merged into
   the new account's cart" waits on the cart one.
-- **The 429 that `/auth/register` and `/auth/login` document.** The per-account half of ADR-019's
-  login limiting is implemented and enforced (five failures, then 423); the per-**address** half is
-  not, so one attacker moving between addresses gets five guesses per account rather than five per
-  IP. Matrix B14 and §10 name it, and it needs `system_settings` thresholds to be worth writing.
 - **The breached-password-list check** registration's contract text asks for. No ADR decides which
   provider answers it, and guessing one would put a third-party call inside account creation.
 - **A request body size limit.** Every `/auth` handler decodes the body it is given, so an oversized

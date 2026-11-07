@@ -117,6 +117,18 @@ func withExpiry(p identity.Principal) identity.Principal {
 // a path asks for the path a client would. The optional middlewares stand in for the Authenticate
 // step, which internal/httpmw tests on its own.
 func router(t *testing.T, svc Service, extra ...gin.HandlerFunc) *gin.Engine {
+	l, _ := testhelper.Logger(t, slog.LevelDebug)
+	return routerWithDeps(t, svc, Deps{
+		Identity:   svc,
+		Authorizer: authz.RBAC{Logger: l},
+		Logger:     l,
+		Cookie:     httpcookie.Session{Name: cookieName},
+	}, extra...)
+}
+
+// routerWithDeps mounts the same operations over an explicit dependency set, so a test can hand
+// the mounted auth surface a rate limiter without rebuilding every handler by hand.
+func routerWithDeps(t *testing.T, svc Service, d Deps, extra ...gin.HandlerFunc) *gin.Engine {
 	t.Helper()
 	l, _ := testhelper.Logger(t, slog.LevelDebug)
 
@@ -125,12 +137,9 @@ func router(t *testing.T, svc Service, extra ...gin.HandlerFunc) *gin.Engine {
 	r.Use(extra...)
 
 	api := r.Group("/api/v1")
-	Mount(api, Deps{
-		Identity:   svc,
-		Authorizer: authz.RBAC{Logger: l},
-		Logger:     l,
-		Cookie:     httpcookie.Session{Name: cookieName},
-	})
+	d.Logger = l
+	d.Authorizer = authz.RBAC{Logger: l}
+	Mount(api, d)
 	return r
 }
 

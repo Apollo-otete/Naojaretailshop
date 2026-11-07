@@ -66,9 +66,18 @@ type Session struct {
 	Absolute  time.Duration
 }
 
+// Login is ADR-019's failure policy: the per-account lockout (MaxFailures in Lockout) and the
+// per-address rate limit that stands beside it — one attacker rotating between accounts must not
+// buy five guesses per account.
 type Login struct {
 	MaxFailures int
 	Lockout     time.Duration
+
+	// RateLimit is the per-address attempt ceiling. The window is RateLimitWindow, and both are
+	// deployment terms rather than constants in the domain: the defaults mirror the lockout policy
+	// so a deployment that changes one changes the other coherently.
+	RateLimit       int
+	RateLimitWindow time.Duration
 }
 
 func (c Config) IsProduction() bool { return c.Env == "production" }
@@ -151,6 +160,12 @@ func (c Config) Validate() error {
 	if c.Login.Lockout <= 0 {
 		errs = append(errs, fmt.Errorf("LOGIN_LOCKOUT must be positive, got %s", c.Login.Lockout))
 	}
+	if c.Login.RateLimit < 1 {
+		errs = append(errs, fmt.Errorf("LOGIN_RATE_LIMIT must be at least 1, got %d", c.Login.RateLimit))
+	}
+	if c.Login.RateLimitWindow <= 0 {
+		errs = append(errs, fmt.Errorf("LOGIN_RATE_WINDOW must be positive, got %s", c.Login.RateLimitWindow))
+	}
 
 	return errors.Join(errs...)
 }
@@ -206,8 +221,10 @@ func Load() (Config, error) {
 		Absolute:  envDuration("SESSION_ABSOLUTE", 12*time.Hour),
 	}
 	c.Login = Login{
-		MaxFailures: envInt("LOGIN_MAX_FAILURES", 5),
-		Lockout:     envDuration("LOGIN_LOCKOUT", 15*time.Minute),
+		MaxFailures:     envInt("LOGIN_MAX_FAILURES", 5),
+		Lockout:         envDuration("LOGIN_LOCKOUT", 15*time.Minute),
+		RateLimit:       envInt("LOGIN_RATE_LIMIT", 5),
+		RateLimitWindow: envDuration("LOGIN_RATE_WINDOW", 15*time.Minute),
 	}
 
 	if c.Database.MinConns > c.Database.MaxConns {
