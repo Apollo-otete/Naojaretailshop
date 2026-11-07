@@ -11,12 +11,32 @@ export default function AdminLogin() {
   const navigate = useNavigate();
 
   React.useEffect(() => {
-    // Enforce fresh login: clean any prior session tokens when visiting login page
-    sessionStorage.removeItem('adminToken');
-    sessionStorage.removeItem('adminInfo');
-    localStorage.removeItem('adminToken');
-    localStorage.removeItem('adminInfo');
-  }, []);
+    let cancelled = false;
+    (async () => {
+      try {
+        const session = await api.auth.getSession();
+        if (cancelled) return;
+        const kind = session?.user?.account_kind || session?.user?.kind;
+        const roles = session?.roles || [];
+        const isAdmin = kind === 'admin' || roles.some((r) => ['admin_2_operations', 'admin_1_business', 'super_admin'].includes(r));
+        if (isAdmin) {
+          navigate('/admin', { replace: true });
+          return;
+        }
+      } catch {
+        // no valid session; show login
+      }
+      if (!cancelled) {
+        sessionStorage.removeItem('adminToken');
+        sessionStorage.removeItem('adminInfo');
+        localStorage.removeItem('adminToken');
+        localStorage.removeItem('adminInfo');
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [navigate]);
 
   const handleLogin = async (e) => {
     e.preventDefault();

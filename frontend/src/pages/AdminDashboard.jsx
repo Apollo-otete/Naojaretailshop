@@ -48,18 +48,38 @@ import PaymentHealthTab from '../components/admin/PaymentHealthTab';
 import FulfillmentTab from '../components/admin/FulfillmentTab';
 import AlertsCentreTab from '../components/admin/AlertsCentreTab';
 
+const ADMIN_ROLES = ['admin_2_operations', 'admin_1_business', 'super_admin'];
+
 function isAdminSession(session) {
   if (!session) return false;
   const kind = session.user?.account_kind || session.user?.accountKind || session.user?.kind;
   if (kind === 'admin') return true;
   const roles = session.roles || [];
-  return roles.some((r) => ['admin_2_operations', 'admin_1_business', 'super_admin'].includes(r));
+  return roles.some((r) => ADMIN_ROLES.includes(r));
+}
+
+function roleProfile(session) {
+  const roles = session?.roles || [];
+  if (roles.includes('super_admin')) return { key: 'super_admin', label: 'Super Admin Portal', tier: 3 };
+  if (roles.includes('admin_1_business')) return { key: 'admin_1_business', label: 'Business Admin Portal', tier: 2 };
+  if (roles.includes('admin_2_operations')) return { key: 'admin_2_operations', label: 'Operations Admin Portal', tier: 1 };
+  return { key: 'admin', label: 'Admin Portal', tier: 0 };
+}
+
+function canAccessTab(roleKey, tabId) {
+  if (roleKey === 'super_admin' || roleKey === 'admin_1_business') return true;
+  // Operations Admin (Admin 2): operational scope (no business analytics/forecast/targets)
+  if (roleKey === 'admin_2_operations') {
+    return !['sales_analytics', 'forecast'].includes(tabId);
+  }
+  return ['overview', 'products', 'categories', 'orders'].includes(tabId);
 }
 
 export default function AdminDashboard() {
   const navigate = useNavigate();
   const [authChecked, setAuthChecked] = useState(false);
   const [authOk, setAuthOk] = useState(false);
+  const [adminSession, setAdminSession] = useState(null);
   const [activeTab, setActiveTab] = useState('overview');
   const [stats, setStats] = useState({
     totalSales: 0,
@@ -269,6 +289,7 @@ export default function AdminDashboard() {
           navigate('/admin/login', { replace: true });
           return;
         }
+        setAdminSession(session);
         setAuthOk(true);
       } catch {
         if (!cancelled) navigate('/admin/login', { replace: true });
@@ -621,6 +642,8 @@ export default function AdminDashboard() {
   };
 
   const unacknowledgedAlertsCount = alertsData.filter(a => !a.acknowledged && (a.severity === 'critical' || a.severity === 'warning')).length;
+  const profile = roleProfile(adminSession);
+  const roleKey = profile.key;
 
   const biMenuItems = [
     { id: 'overview', label: 'Live Command', icon: Activity, liveDot: true },
@@ -630,7 +653,7 @@ export default function AdminDashboard() {
     { id: 'payment_health', label: 'M-Pesa Diagnostics', icon: CreditCard },
     { id: 'fulfillment', label: 'Logistics Funnel', icon: Truck },
     { id: 'alerts', label: 'Alerts Centre', icon: BellRing, badge: unacknowledgedAlertsCount ? unacknowledgedAlertsCount : null, badgeColor: 'bg-rose-600' }
-  ];
+  ].filter((item) => canAccessTab(roleKey, item.id));
 
   const storeMenuItems = [
     { id: 'products', label: 'Products', icon: ShoppingBag, badge: stats.lowStockCount ? stats.lowStockCount : null },
@@ -639,7 +662,14 @@ export default function AdminDashboard() {
     { id: 'reviews', label: 'Reviews', icon: Star, badge: reviews.filter(r => !r.is_approved).length ? reviews.filter(r => !r.is_approved).length : null },
     { id: 'messages', label: 'Inquiries', icon: MessageSquare, badge: stats.pendingMessagesCount ? stats.pendingMessagesCount : null },
     { id: 'subscribers', label: 'Subscribers', icon: Users }
-  ];
+  ].filter((item) => canAccessTab(roleKey, item.id));
+
+  const visibleTabIds = [...biMenuItems, ...storeMenuItems].map((i) => i.id);
+  useEffect(() => {
+    if (authOk && visibleTabIds.length > 0 && !visibleTabIds.includes(activeTab)) {
+      setActiveTab(visibleTabIds[0]);
+    }
+  }, [authOk, roleKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Filters logic
   const filteredProducts = products.filter(p => {
@@ -687,10 +717,10 @@ export default function AdminDashboard() {
             </div>
             <div className="flex flex-col">
               <span className="font-display text-base font-extrabold text-gray-950 tracking-tight flex items-center gap-1.5 leading-tight">
-                NAOJA <span className="text-[10px] font-extrabold uppercase bg-brand-500 text-white px-1.5 py-0.5 rounded tracking-normal">Ops Hub</span>
+                NAOJA <span className="text-[10px] font-extrabold uppercase bg-brand-500 text-white px-1.5 py-0.5 rounded tracking-normal">{profile.label.replace(' Portal', '')}</span>
               </span>
               <span className="text-[10px] uppercase font-bold tracking-wider text-gray-400 -mt-0.5">
-                Executive & Retail Control
+                {adminSession?.user?.full_name || adminSession?.user?.email || 'Admin access (role-based)'}
               </span>
             </div>
           </div>
