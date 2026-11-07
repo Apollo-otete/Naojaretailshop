@@ -1,11 +1,11 @@
 // Admin console entry (separate build from the storefront).
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import AdminLogin from '../pages/AdminLogin';
-import AdminDashboard from '../pages/AdminDashboard';
+import AdminLogin from '../../src/pages/AdminLogin';
+import AdminDashboard from '../../src/pages/AdminDashboard';
 
 export default function AdminApp() {
   return (
-    <BrowserRouter basename="/admin">
+    <BrowserRouter>
       <Routes>
         <Route path="/login" element={<AdminLogin />} />
         <Route path="/" element={<AdminDashboard />} />
