@@ -21,6 +21,7 @@ import (
 	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/httpcookie"
 	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/httpjson"
 	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/identity"
+	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/media/cloudinary"
 	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/ordering"
 	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/shopping"
 )
@@ -68,7 +69,7 @@ func mountLegacy(r gin.IRouter, d Deps, cookie httpcookie.Session) {
 	r.GET("/contacts", legacyBearerAuth(d), legacyStubOK([]any{}))
 	r.POST("/contacts", legacyStubCreated(gin.H{"message": "Message sent."}))
 	r.PUT("/contacts/:id/read", legacyBearerAuth(d), legacyStubOK(gin.H{}))
-	r.POST("/upload", legacyBearerAuth(d), legacyStubOK(gin.H{"url": ""}))
+	r.POST("/upload", legacyBearerAuth(d), legacyUpload(d))
 	// M-Pesa compat stubs (no Daraja adapter yet) — frontend polls; return "pending/unavailable" shapes.
 	r.POST("/mpesa/stkpush", legacyStubOK(gin.H{"CheckoutRequestID": "", "MerchantRequestID": "", "ResponseDescription": "M-Pesa is not configured on this server."}))
 	r.POST("/mpesa/query", legacyStubOK(gin.H{"ResultCode": "1", "ResultDesc": "Not configured"}))
@@ -681,3 +682,41 @@ var _ = context.Background
 var _ = httpauth.Deps{}
 var _ = httpcatalogue.Service(nil)
 var _ = shopping.Cart{}
+
+func legacyUpload(d Deps) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		cl := cloudinary.New(d.Cfg.Cloudinary)
+		if !cl.Enabled() {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"message": "Image upload is not configured (Cloudinary)."})
+			return
+		}
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 10<<20) // 10MB
+		file, header, err := c.Request.FormFile("file")
+		if err != nil {
+			file, header, err = c.Request.FormFile("image")
+		}
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"message": "A file (form field 'file' or 'image') is required."})
+			return
+		}
+		defer file.Close()
+		data, err := io.ReadAll(io.LimitReader(file, 10<<20))
+		if err != nil {
+			httpjson.Fail(c, d.Logger, err)
+			return
+		}
+		name := "upload"
+		if header != nil && header.Filename != "" {
+			name = header.Filename
+		}
+		res, err := cl.Upload(name, data, "naoja/products")
+		if err != nil {
+			if d.Logger != nil {
+				d.Logger.Error("cloudinary upload failed", "error", err.Error())
+			}
+			c.JSON(http.StatusBadGateway, gin.H{"message": "Upload failed."})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"url": res.URL, "secure_url": res.SecureURL, "public_id": res.PublicID})
+	}
+}

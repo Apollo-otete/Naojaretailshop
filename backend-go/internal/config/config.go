@@ -23,25 +23,27 @@ type Config struct {
 	CORS         CORS
 	HTTPTimeouts Timeouts
 
-	// Session and Login are ADR-019's numbers. What the ADR fixes is the *shape* — sliding
-	// expiry under an absolute cap, a shorter idle window for an administrative session than
-	// for a shopper's, and a per-account failure limit beside the per-address one. The values
-	// are deployment terms, so they are environment configuration here rather than constants
-	// in the domain; the defaults below are the shortest ones that still leave a session usable
-	// by a person rather than by a script.
 	Session Session
 	Login   Login
 
-	// SessionCookieName is referenced by the middleware contract even though sessions
-	// themselves land in Phase 3 (ADR-019); it is here so the cookie attributes have one
-	// authoritative source rather than being re-decided per call site.
 	SessionCookieName string
+	RequestIDTrust    bool // accept an inbound X-Request-Id (only when behind a proxy we control)
 
-	RequestIDTrust bool // accept an inbound X-Request-Id (only when behind a proxy we control)
-
-	// Mpesa configures the Daraja (M-Pesa) integration (P1). Optional: when disabled/unset the
-	// payments adapter is not wired and payment endpoints report unavailability.
+	// Mpesa configures the Daraja (M-Pesa) integration (P1). Optional when unset.
 	Mpesa Mpesa
+
+	// Cloudinary configures image uploads. Optional when unset.
+	Cloudinary Cloudinary
+
+	// Email (e.g. Resend) for transactional messages. Optional when unset.
+	Email Email
+
+	// Pusher for realtime/in-app notifications. Optional when unset.
+	Pusher Pusher
+
+	// Public/Frontend URLs (used for links/callback composition). Optional.
+	FrontendURL   string
+	PublicBaseURL string
 }
 
 type Database struct {
@@ -103,6 +105,34 @@ func (m Mpesa) Enabled() bool {
 		strings.TrimSpace(m.Shortcode) != "" &&
 		strings.TrimSpace(m.Passkey) != "" &&
 		strings.TrimSpace(m.CallbackURL) != ""
+}
+
+type Cloudinary struct {
+	CloudName string
+	APIKey    string
+	APISecret string
+}
+
+func (c Cloudinary) Enabled() bool {
+	return strings.TrimSpace(c.CloudName) != "" && strings.TrimSpace(c.APIKey) != "" && strings.TrimSpace(c.APISecret) != ""
+}
+
+type Email struct {
+	Provider  string // e.g. resend
+	APIKey    string
+	FromEmail string
+	FromName  string
+}
+
+func (e Email) Enabled() bool { return strings.TrimSpace(e.APIKey) != "" }
+
+type Pusher struct {
+	InstanceID string
+	APIKey     string
+}
+
+func (p Pusher) Enabled() bool {
+	return strings.TrimSpace(p.APIKey) != "" || strings.TrimSpace(p.InstanceID) != ""
 }
 
 func (c Config) IsProduction() bool { return c.Env == "production" }
@@ -253,6 +283,23 @@ func Load() (Config, error) {
 	}
 
 	c.Mpesa = loadMpesa()
+	c.Cloudinary = Cloudinary{
+		CloudName: envStr("CLOUDINARY_CLOUD_NAME", ""),
+		APIKey:    envStr("CLOUDINARY_API_KEY", ""),
+		APISecret: envStr("CLOUDINARY_API_SECRET", ""),
+	}
+	c.Email = Email{
+		Provider:  envStr("EMAIL_PROVIDER", "resend"),
+		APIKey:    envStr("RESEND_API_KEY", envStr("EMAIL_API_KEY", "")),
+		FromEmail: envStr("EMAIL_FROM", ""),
+		FromName:  envStr("EMAIL_FROM_NAME", "Naoja"),
+	}
+	c.Pusher = Pusher{
+		InstanceID: envStr("PUSHER_INSTANCE_ID", ""),
+		APIKey:     envStr("PUSHER_API_KEY", ""),
+	}
+	c.FrontendURL = envStr("FRONTEND_URL", "")
+	c.PublicBaseURL = envStr("PUBLIC_BASE_URL", "")
 
 	if c.Database.MinConns > c.Database.MaxConns {
 		return Config{}, fmt.Errorf("DB_MIN_CONNS (%d) cannot exceed DB_MAX_CONNS (%d)", c.Database.MinConns, c.Database.MaxConns)
