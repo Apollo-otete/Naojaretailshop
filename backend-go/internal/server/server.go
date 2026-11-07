@@ -15,9 +15,12 @@ import (
 	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/apierr"
 	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/config"
 	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/httpauth"
+	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/httpcatalogue"
 	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/httpcookie"
 	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/httpjson"
 	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/httpmw"
+	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/httpordering"
+	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/httpshopping"
 	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/observability"
 	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/port"
 )
@@ -45,6 +48,15 @@ type Deps struct {
 	// wrongly somewhere else.
 	Identity httpauth.Service
 
+	// Catalogue is the use-case surface behind the /products and /categories operations.
+	Catalogue httpcatalogue.Service
+
+	// Shopping is the use-case surface behind the /cart operations.
+	Shopping httpshopping.Service
+
+	// Ordering is the use-case surface behind the /orders operations.
+	Ordering httpordering.Service
+
 	Checkers  []port.Checker
 	Version   string
 	StartedAt time.Time
@@ -63,6 +75,11 @@ func New(d Deps) (*gin.Engine, error) {
 	if d.Identity == nil {
 		return nil, fmt.Errorf("%w: Identity — the contract's /auth operations would be registered against nothing, and there would be no way to obtain the session every other route requires", ErrMissingDependency)
 	}
+	// Catalogue is optional at engine construction so the middleware/health tests can build an
+	// engine without a full dependency graph; main.go always wires it, and its absence is a
+	// deployment error caught by review rather than by a startup panic. When present, its routes
+	// are mounted below alongside identity's.
+	catalogueSvc := d.Catalogue
 	if d.Logger == nil {
 		d.Logger = slog.Default()
 	}
@@ -124,6 +141,30 @@ func New(d Deps) (*gin.Engine, error) {
 		Logger:     d.Logger,
 		Cookie:     cookie,
 	})
+
+	if catalogueSvc != nil {
+		httpcatalogue.Mount(api, httpcatalogue.Deps{
+			Catalogue:  catalogueSvc,
+			Authorizer: d.Authorizer,
+			Logger:     d.Logger,
+		})
+	}
+
+	if d.Shopping != nil {
+		httpshopping.Mount(api, httpshopping.Deps{
+			Shopping:   d.Shopping,
+			Authorizer: d.Authorizer,
+			Logger:     d.Logger,
+		})
+	}
+
+	if d.Ordering != nil {
+		httpordering.Mount(api, httpordering.Deps{
+			Ordering:   d.Ordering,
+			Authorizer: d.Authorizer,
+			Logger:     d.Logger,
+		})
+	}
 
 	// Unmatched routes get the contract envelope. Gin's default is a plain-text "404 page not
 	// found", which any client that parses errors has to special-case — and a body that only

@@ -19,13 +19,19 @@ import (
 
 	auditpg "github.com/Apollo-otete/Naojaretailshop/backend-go/internal/audit/postgres"
 	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/authz"
+	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/catalogue"
+	cataloguepg "github.com/Apollo-otete/Naojaretailshop/backend-go/internal/catalogue/postgres"
 	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/config"
 	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/database"
 	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/identity"
 	identitypg "github.com/Apollo-otete/Naojaretailshop/backend-go/internal/identity/postgres"
 	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/observability"
+	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/ordering"
+	orderingpg "github.com/Apollo-otete/Naojaretailshop/backend-go/internal/ordering/postgres"
 	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/port"
 	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/server"
+	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/shopping"
+	shoppingpg "github.com/Apollo-otete/Naojaretailshop/backend-go/internal/shopping/postgres"
 )
 
 // version is replaced at build time: -ldflags "-X main.version=$(git describe --tags)".
@@ -103,6 +109,61 @@ func run() error {
 		return fmt.Errorf("identity service: %w", err)
 	}
 
+	// Catalogue adapters: one store over the catalogue schema, plus the shared transactor
+	// and audit writer already wired for identity.
+	catStore, err := cataloguepg.New(pg.Pool())
+	if err != nil {
+		return fmt.Errorf("catalogue store: %w", err)
+	}
+	cat, err := catalogue.NewService(catalogue.Deps{
+		Categories: catStore,
+		Products:   catStore,
+		Tx:         cataloguepg.NewTx(pg.Pool()),
+		Audit:      auditWriter,
+		Clock:      time.Now,
+		Logger:     l,
+	})
+	if err != nil {
+		return fmt.Errorf("catalogue service: %w", err)
+	}
+
+	// Shopping adapters.
+	shopStore, err := shoppingpg.New(pg.Pool())
+	if err != nil {
+		return fmt.Errorf("shopping store: %w", err)
+	}
+	shop, err := shopping.NewService(shopping.Deps{
+		Carts:      shopStore,
+		Products:   catStore,
+		Authorizer: authz.RBAC{Logger: l},
+		Tx:         shoppingpg.NewTx(pg.Pool()),
+		Audit:      auditWriter,
+		Clock:      time.Now,
+		Logger:     l,
+	})
+	if err != nil {
+		return fmt.Errorf("shopping service: %w", err)
+	}
+
+	// Ordering adapters.
+	orderStore, err := orderingpg.New(pg.Pool())
+	if err != nil {
+		return fmt.Errorf("ordering store: %w", err)
+	}
+	ord, err := ordering.NewService(ordering.Deps{
+		Orders:     orderStore,
+		Products:   catStore,
+		Carts:      shopStore,
+		Authorizer: authz.RBAC{Logger: l},
+		Tx:         orderingpg.NewTx(pg.Pool()),
+		Audit:      auditWriter,
+		Clock:      time.Now,
+		Logger:     l,
+	})
+	if err != nil {
+		return fmt.Errorf("ordering service: %w", err)
+	}
+
 	deps := server.Deps{
 		Logger:     l,
 		Cfg:        cfg,
@@ -118,7 +179,10 @@ func run() error {
 		// The same service behind both: the routes that issue a session and the middleware that
 		// reads one must be answering to one implementation, or a login and a request could
 		// disagree about what the same cookie means.
-		Identity: ident,
+		Identity:  ident,
+		Catalogue: cat,
+		Shopping:  shop,
+		Ordering:  ord,
 	}
 
 	handler, err := server.New(deps)

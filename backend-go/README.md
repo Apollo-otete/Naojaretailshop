@@ -10,10 +10,13 @@ connection, migrations, and test harness"* — is complete against its Phase 2 e
 
 Work is now on **step 6** (*"Build identity/RBAC and catalogue as the first vertical slices, with
 tests and a usable frontend integration"*), whose Phase 3 exit criterion is *"Role lifecycle and
-authorization tests pass"*. The identity half exists — the schema, the Argon2id and session rules,
-the RBAC evaluator and its ownership conditions, the middleware chain that applies them, and the
-contract's five `/auth` operations on top of it. The catalogue slice and the role-boundary tests
-(matrix B1–B14) do not. See *Deliberate state* below.
+authorization tests pass"*. The identity half is complete — the schema, the Argon2id and session
+rules, the RBAC evaluator and its ownership conditions, the middleware chain that applies them, and
+the contract's five `/auth` operations on top of it. The catalogue half has now been built the same
+way and its tests are in: domain rules in `internal/catalogue`, store/service/transport wired
+through the ports, migrations 0005, and a handler suite that pins the mounted operation set to the
+contract's. The role-boundary suite (matrix B1–B13, B15) passes against PostgreSQL, and B14/B16/B17
+stay where the slices they need are not built yet. See *Deliberate state* below.
 
 Both criteria are checkable here:
 
@@ -129,9 +132,9 @@ ships by accident; DenyAll was its safe version, and it was replaced rather than
 
 Also not present, on purpose:
 
-- **Every business endpoint from the contract.** Catalogue, cart, checkout, orders and payments are
-  the next slices, and `/auth/register`'s promise that "the guest cart held by this browser is
-  merged into the new account's cart" waits on the cart one.
+- **Every business endpoint from the contract.** Cart, checkout, orders and payments are the next
+  slices, and `/auth/register`'s promise that "the guest cart held by this browser is merged into
+  the new account's cart" waits on the cart one.
 - **The 429 that `/auth/register` and `/auth/login` document.** The per-account half of ADR-019's
   login limiting is implemented and enforced (five failures, then 423); the per-**address** half is
   not, so one attacker moving between addresses gets five guesses per account rather than five per

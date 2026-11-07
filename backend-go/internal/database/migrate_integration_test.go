@@ -141,12 +141,20 @@ func TestDownOneStepRollsBackExactlyOneMigration(t *testing.T) {
 		t.Fatalf("down 1: %v", err)
 	}
 
-	// The head is 0004, which owns one column and no tables — so the assertion moves with it,
-	// exactly as the comment in the version before this one predicted. What must not move is the
-	// shape of the check: the head's own artifact disappears, and one thing from below it does
-	// not.
-	if columnExists(t, conn, "identity", "permissions", "conditions") {
-		t.Error("identity.permissions.conditions survived a one-step rollback of the head migration")
+	// The head is now 0007 (commerce orders), which owns the order tables — so rolling back one
+	// step must remove them, while the cart tables added by 0006 and the catalogue tables added
+	// by 0005 and the conditions column added by 0004 must survive.
+	if tableExists(t, conn, "commerce", "orders") {
+		t.Error("commerce.orders survived a one-step rollback of the head migration")
+	}
+	if !tableExists(t, conn, "commerce", "carts") {
+		t.Error("a one-step rollback removed commerce.carts, which 0006 owns")
+	}
+	if !tableExists(t, conn, "catalogue", "products") {
+		t.Error("a one-step rollback removed catalogue.products, which 0005 owns")
+	}
+	if !columnExists(t, conn, "identity", "permissions", "conditions") {
+		t.Error("a one-step rollback removed identity.permissions.conditions, which 0004 owns")
 	}
 	for _, owned := range [][2]string{{"identity", "users"}, {"identity", "permissions"},
 		{"administration", "system_settings"}} {
