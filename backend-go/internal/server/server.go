@@ -122,10 +122,6 @@ func New(d Deps) (*gin.Engine, error) {
 	// the orchestrator into a restart storm.
 	registerHealth(r, d)
 
-	// Everything from here on is authenticated, because the contract puts sessionCookie in the
-	// top-level security list. CSRF follows Authenticate for a mechanical reason: the token it
-	// compares against is carried by the principal Authenticate installs, so the order is the
-	// difference between a check and a no-op.
 	cookie := httpcookie.Session{
 		Name: d.Cfg.SessionCookieName,
 		// A Secure-only cookie cannot be set over http://localhost, so the development
@@ -133,6 +129,16 @@ func New(d Deps) (*gin.Engine, error) {
 		// environment where cleartext is a real exposure.
 		Secure: d.Cfg.IsProduction(),
 	}
+
+	// Legacy /api compatibility for the existing frontend (token/Bearer auth, legacy shapes).
+	// Mounted before cookie session+CSRF so the frontend's current auth flow keeps working while
+	// /api/v1 remains the contract surface. Both are served by this one binary.
+	legacy := r.Group("/api")
+	if catalogueSvc != nil || d.Identity != nil || d.Shopping != nil || d.Ordering != nil {
+		mountLegacy(legacy, d, cookie)
+	}
+
+	// Everything from here on is the contract surface, authenticated by session cookie and CSRF.
 	r.Use(httpmw.Authenticate(d.Logger, d.Sessions, cookie))
 	r.Use(httpmw.CSRF(d.Logger))
 
