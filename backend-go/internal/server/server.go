@@ -21,6 +21,7 @@ import (
 	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/httpjson"
 	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/httpmw"
 	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/httpordering"
+	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/httppayments"
 	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/httpshopping"
 	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/observability"
 	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/ordering"
@@ -67,6 +68,9 @@ type Deps struct {
 
 	// Checkout provides contract quote creation (/checkout/quotes). Optional if Ordering handles it.
 	Checkout httpcheckout.Service
+
+	// Payments handles STK initiation and Daraja callbacks (P1). Optional.
+	Payments httppayments.Service
 
 	// Legacy compat: order store/tx for translating the existing frontend's checkout payload
 	// where the full cart/quote flow is not yet wired end-to-end. Optional.
@@ -148,6 +152,11 @@ func New(d Deps) (*gin.Engine, error) {
 		mountLegacy(legacy, d, cookie)
 	}
 
+	// Daraja callbacks are server-to-server (no user session/CSRF). Mount before auth middleware.
+	if d.Payments != nil {
+		httppayments.MountCallback(r, httppayments.Deps{Payments: d.Payments, Authorizer: d.Authorizer, Logger: d.Logger})
+	}
+
 	// Everything from here on is the contract surface, authenticated by session cookie and CSRF.
 	r.Use(httpmw.Authenticate(d.Logger, d.Sessions, cookie))
 	r.Use(httpmw.CSRF(d.Logger))
@@ -202,6 +211,10 @@ func New(d Deps) (*gin.Engine, error) {
 			Authorizer: d.Authorizer,
 			Logger:     d.Logger,
 		})
+	}
+
+	if d.Payments != nil {
+		httppayments.MountAuthenticated(api, httppayments.Deps{Payments: d.Payments, Authorizer: d.Authorizer, Logger: d.Logger})
 	}
 
 	// Unmatched routes get the contract envelope. Gin's default is a plain-text "404 page not

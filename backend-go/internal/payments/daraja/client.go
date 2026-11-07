@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/config"
-	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/payments"
 )
 
 type Client struct {
@@ -139,9 +138,23 @@ func (c *Client) STKPush(ctx context.Context, in STKRequest) (STKResponse, error
 	return STKResponse{MerchantRequestID: out.MerchantRequestID, CheckoutRequestID: out.CheckoutRequestID, ResponseCode: out.ResponseCode, ResponseDescription: out.ResponseDescription, CustomerMessage: out.CustomerMessage, Raw: body}, nil
 }
 
+// CallbackResult is the normalized outcome of a Daraja STK callback.
+type CallbackResult struct {
+	MerchantRequestID string
+	CheckoutRequestID string
+	ResultCode        int
+	ResultDesc        string
+	AmountCents       *int64 // whole KES * 100 when present
+	MpesaReceipt      string
+	Phone             string
+	Raw               []byte
+}
+
+func (r CallbackResult) Success() bool { return r.ResultCode == 0 && r.MpesaReceipt != "" }
+
 // ParseCallback parses Safaricom's STK callback envelope into a normalized result.
 // It never trusts amounts for settlement until correlated and checked against the order.
-func ParseCallback(body []byte) (payments.CallbackResult, error) {
+func ParseCallback(body []byte) (CallbackResult, error) {
 	var env struct {
 		Body struct {
 			StkCallback struct {
@@ -159,10 +172,10 @@ func ParseCallback(body []byte) (payments.CallbackResult, error) {
 		} `json:"Body"`
 	}
 	if err := json.Unmarshal(body, &env); err != nil {
-		return payments.CallbackResult{}, err
+		return CallbackResult{}, err
 	}
 	cb := env.Body.StkCallback
-	r := payments.CallbackResult{
+	r := CallbackResult{
 		MerchantRequestID: cb.MerchantRequestID,
 		CheckoutRequestID: cb.CheckoutRequestID,
 		ResultCode:        cb.ResultCode,

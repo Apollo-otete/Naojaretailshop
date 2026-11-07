@@ -30,6 +30,9 @@ import (
 	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/observability"
 	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/ordering"
 	orderingpg "github.com/Apollo-otete/Naojaretailshop/backend-go/internal/ordering/postgres"
+	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/payments"
+	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/payments/daraja"
+	paymentspg "github.com/Apollo-otete/Naojaretailshop/backend-go/internal/payments/postgres"
 	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/port"
 	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/server"
 	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/shopping"
@@ -174,6 +177,22 @@ func run() error {
 		return fmt.Errorf("ordering service: %w", err)
 	}
 
+	// Payments (P1): Daraja/M-Pesa. Safe when unconfigured (endpoints report unavailable).
+	payStore, err := paymentspg.New(pg.Pool())
+	if err != nil {
+		return fmt.Errorf("payments store: %w", err)
+	}
+	paySvc := payments.NewService(payments.Deps{
+		Store:      payStore,
+		Orders:     payStore,
+		OrderState: payStore,
+		Inventory:  invStore,
+		Tx:         paymentspg.NewTx(pg.Pool()),
+		Daraja:     daraja.New(cfg.Mpesa),
+		Clock:      time.Now,
+		Logger:     l,
+	})
+
 	deps := server.Deps{
 		Logger:     l,
 		Cfg:        cfg,
@@ -194,6 +213,7 @@ func run() error {
 		Shopping:  shop,
 		Checkout:  ord,
 		Ordering:  ord,
+		Payments:  paySvc,
 
 		LegacyOrderStore: orderStore,
 		LegacyOrderTx:    orderingpg.NewTx(pg.Pool()),

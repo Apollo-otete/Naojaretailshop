@@ -84,20 +84,6 @@ type Transaction struct {
 	RawPayload            []byte
 }
 
-// CallbackResult is the normalized outcome of a Daraja STK callback.
-type CallbackResult struct {
-	MerchantRequestID string
-	CheckoutRequestID string
-	ResultCode        int
-	ResultDesc        string
-	AmountCents       *int64 // whole KES * 100 when present
-	MpesaReceipt      string
-	Phone             string
-	Raw               []byte
-}
-
-func (r CallbackResult) Success() bool { return r.ResultCode == 0 && r.MpesaReceipt != "" }
-
 type OrderRef struct {
 	ID         int64
 	Reference  string
