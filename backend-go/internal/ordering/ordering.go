@@ -12,7 +12,9 @@ import (
 type OrderStatus string
 
 const (
+	StatusPending        OrderStatus = "pending" // contract: placed, stock reserved, awaiting payment
 	StatusPendingPayment OrderStatus = "pending_payment"
+	StatusConfirmed      OrderStatus = "confirmed"
 	StatusPaid           OrderStatus = "paid"
 	StatusProcessing     OrderStatus = "processing"
 	StatusReady          OrderStatus = "ready"
@@ -21,11 +23,13 @@ const (
 	StatusCancelled      OrderStatus = "cancelled"
 	StatusFailed         OrderStatus = "failed"
 	StatusExpired        OrderStatus = "expired"
+	StatusReturned       OrderStatus = "returned"
+	StatusRefunded       OrderStatus = "refunded"
 )
 
 func (s OrderStatus) Valid() bool {
 	switch s {
-	case StatusPendingPayment, StatusPaid, StatusProcessing, StatusReady, StatusDispatched, StatusDelivered, StatusCancelled, StatusFailed, StatusExpired:
+	case StatusPending, StatusPendingPayment, StatusConfirmed, StatusPaid, StatusProcessing, StatusReady, StatusDispatched, StatusDelivered, StatusCancelled, StatusFailed, StatusExpired, StatusReturned, StatusRefunded:
 		return true
 	}
 	return false
@@ -38,6 +42,7 @@ const (
 	PayPaid     PaymentStatus = "paid"
 	PayFailed   PaymentStatus = "failed"
 	PayRefunded PaymentStatus = "refunded"
+	PayExpired  PaymentStatus = "expired"
 )
 
 type Order struct {
@@ -58,6 +63,18 @@ type Order struct {
 	UpdatedAt            time.Time     `json:"updated_at"`
 	PaidAt               *time.Time    `json:"paid_at"`
 	CancelledAt          *time.Time    `json:"cancelled_at"`
+
+	// P0 contract placement fields (nullable for legacy rows).
+	FulfilmentMethod *string `json:"fulfilment_method,omitempty"`
+	QuoteID          *int64  `json:"quote_id,omitempty"`
+	ContactName      *string `json:"contact_name,omitempty"`
+	ContactEmail     *string `json:"contact_email,omitempty"`
+	DeliveryZoneID   *int64  `json:"delivery_zone_id,omitempty"`
+	DeliveryArea     *string `json:"delivery_area,omitempty"`
+	DeliveryCounty   *string `json:"delivery_county,omitempty"`
+	DeliveryLandmark *string `json:"delivery_landmark,omitempty"`
+	PickupWindowID   *int64  `json:"pickup_window_id,omitempty"`
+	Notes            *string `json:"notes,omitempty"`
 }
 
 type OrderItem struct {

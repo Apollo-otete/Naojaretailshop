@@ -16,6 +16,7 @@ import (
 	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/config"
 	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/httpauth"
 	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/httpcatalogue"
+	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/httpcheckout"
 	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/httpcookie"
 	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/httpjson"
 	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/httpmw"
@@ -61,8 +62,11 @@ type Deps struct {
 	// Shopping is the use-case surface behind the /cart operations.
 	Shopping httpshopping.Service
 
-	// Ordering is the use-case surface behind the /orders operations.
+	// Ordering is the use-case surface behind the /orders operations (contract idempotent placement).
 	Ordering httpordering.Service
+
+	// Checkout provides contract quote creation (/checkout/quotes). Optional if Ordering handles it.
+	Checkout httpcheckout.Service
 
 	// Legacy compat: order store/tx for translating the existing frontend's checkout payload
 	// where the full cart/quote flow is not yet wired end-to-end. Optional.
@@ -172,6 +176,21 @@ func New(d Deps) (*gin.Engine, error) {
 	if d.Shopping != nil {
 		httpshopping.Mount(api, httpshopping.Deps{
 			Shopping:   d.Shopping,
+			Authorizer: d.Authorizer,
+			Logger:     d.Logger,
+		})
+	}
+
+	checkoutSvc := d.Checkout
+	if checkoutSvc == nil && d.Ordering != nil {
+		// *ordering.Service satisfies httpcheckout.Service; allow a single dep in simple wiring.
+		if cs, ok := any(d.Ordering).(httpcheckout.Service); ok {
+			checkoutSvc = cs
+		}
+	}
+	if checkoutSvc != nil {
+		httpcheckout.Mount(api, httpcheckout.Deps{
+			Ordering:   checkoutSvc,
 			Authorizer: d.Authorizer,
 			Logger:     d.Logger,
 		})
