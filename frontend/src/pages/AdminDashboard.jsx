@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import {
   LayoutDashboard,
@@ -48,7 +48,18 @@ import PaymentHealthTab from '../components/admin/PaymentHealthTab';
 import FulfillmentTab from '../components/admin/FulfillmentTab';
 import AlertsCentreTab from '../components/admin/AlertsCentreTab';
 
+function isAdminSession(session) {
+  if (!session) return false;
+  const kind = session.user?.account_kind || session.user?.accountKind || session.user?.kind;
+  if (kind === 'admin') return true;
+  const roles = session.roles || [];
+  return roles.some((r) => ['admin_2_operations', 'admin_1_business', 'super_admin'].includes(r));
+}
+
 export default function AdminDashboard() {
+  const navigate = useNavigate();
+  const [authChecked, setAuthChecked] = useState(false);
+  const [authOk, setAuthOk] = useState(false);
   const [activeTab, setActiveTab] = useState('overview');
   const [stats, setStats] = useState({
     totalSales: 0,
@@ -161,6 +172,13 @@ export default function AdminDashboard() {
       if (messagesData) setMessages(messagesData);
     } catch (err) {
       console.error('Error fetching admin data:', err);
+      if (err?.status === 401 || err?.status === 403) {
+        sessionStorage.removeItem('adminToken');
+        sessionStorage.removeItem('adminInfo');
+        localStorage.removeItem('adminToken');
+        localStorage.removeItem('adminInfo');
+        navigate('/admin/login', { replace: true });
+      }
     } finally {
       setLoading(false);
     }
@@ -238,12 +256,40 @@ export default function AdminDashboard() {
   };
 
   useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const session = await api.auth.getSession();
+        if (cancelled) return;
+        if (!isAdminSession(session)) {
+          sessionStorage.removeItem('adminToken');
+          sessionStorage.removeItem('adminInfo');
+          localStorage.removeItem('adminToken');
+          localStorage.removeItem('adminInfo');
+          navigate('/admin/login', { replace: true });
+          return;
+        }
+        setAuthOk(true);
+      } catch {
+        if (!cancelled) navigate('/admin/login', { replace: true });
+      } finally {
+        if (!cancelled) setAuthChecked(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [navigate]);
+
+  useEffect(() => {
+    if (!authOk) return;
     fetchData();
     fetchAllAnalytics();
-  }, []);
+  }, [authOk]);
 
-  // Real-time SSE stream hook
+  // Real-time SSE stream hook (admin-only)
   useEffect(() => {
+    if (!authOk) return;
     const streamUrl = analyticsApi.getStreamUrl();
     const sse = new SSEClient(
       streamUrl,
@@ -274,20 +320,23 @@ export default function AdminDashboard() {
     return () => {
       sse.disconnect();
     };
-  }, [soundEnabled]);
+  }, [authOk, soundEnabled]);
 
   useEffect(() => {
+    if (!authOk) return;
     analyticsApi.getSummary(salesRange).then(setSalesSummary).catch(() => {});
     analyticsApi.getCategoryPerformance(salesRange).then(setCategoryAnalytics).catch(() => {});
-  }, [salesRange]);
+  }, [authOk, salesRange]);
 
   useEffect(() => {
+    if (!authOk) return;
     analyticsApi.getPaymentHealth(paymentRange).then(setPaymentData).catch(() => {});
-  }, [paymentRange]);
+  }, [authOk, paymentRange]);
 
   useEffect(() => {
+    if (!authOk) return;
     analyticsApi.getFulfillment(fulfillmentRange).then(setFulfillmentData).catch(() => {});
-  }, [fulfillmentRange]);
+  }, [authOk, fulfillmentRange]);
 
   // Sync Analytics with local updates
   const refreshAnalytics = (updatedProducts = products, updatedOrders = orders, updatedSubscribers = subscribers, updatedMessages = messages) => {
@@ -562,9 +611,10 @@ export default function AdminDashboard() {
       const res = await api.uploadImage(file);
       setProductForm(prev => ({ ...prev, image_url: res.url, image_preview: res.url }));
     } catch (err) {
-      // Backend offline – keep local preview URL as fallback
-      setProductForm(prev => ({ ...prev, image_url: localPreview }));
-      console.warn('Upload to server failed, using local blob URL as fallback.');
+      // Upload failed (e.g. Cloudinary not configured) — keep local preview for review only.
+      setProductForm(prev => ({ ...prev, image_url: '' }));
+      console.warn('Image upload failed:', err?.message || err);
+      alert(err?.message || 'Image upload failed. Configure Cloudinary on the server to enable uploads.');
     } finally {
       setUploadingImage(false);
     }
@@ -604,6 +654,18 @@ export default function AdminDashboard() {
     const matchesPayment = orderPaymentFilter ? o.payment_status === orderPaymentFilter : true;
     return matchesSearch && matchesStatus && matchesPayment;
   });
+
+  if (!authChecked) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center font-sans">
+        <div className="text-sm font-semibold text-gray-500">Checking admin access…</div>
+      </div>
+    );
+  }
+
+  if (!authOk) {
+    return null;
+  }
 
   return (
     <div className="min-h-screen flex flex-col font-sans" style={{background: 'linear-gradient(135deg, #f0f4ff 0%, #f8f9fc 50%, #f0f7f4 100%)'}}>

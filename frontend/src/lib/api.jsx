@@ -54,6 +54,14 @@ async function request(endpoint, options = {}) {
 }
 
 export const api = {
+  // Auth (real backend session)
+  auth: {
+    login: (credentials) => request('/api/auth/login', { method: 'POST', body: credentials }),
+    logout: () => request('/api/v1/auth/logout', { method: 'DELETE' }).catch(() => null),
+    getSession: () => request('/api/v1/auth/session'),
+    changePassword: (data) => request('/api/auth/change-password', { method: 'PUT', body: data }),
+  },
+
   // Products (real catalogue)
   getProducts: (categorySlug = '', search = '', page = null, limit = null) => {
     const params = new URLSearchParams();
