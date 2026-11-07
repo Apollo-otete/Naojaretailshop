@@ -58,15 +58,34 @@ type Detail struct {
 	Available int    `json:"available,omitempty"`
 }
 
+// InsufficientItem is one entry in a STOCK_INSUFFICIENT conflict (contracts StockConflict.insufficient).
+type InsufficientItem struct {
+	ProductID int64  `json:"product_id"`
+	Name      string `json:"name,omitempty"`
+	Requested int    `json:"requested"`
+	Available int    `json:"available"`
+}
+
+// StaleLine is one re-priced/invalid line in a QUOTE_STALE conflict (contracts CartLineIssue).
+type StaleLine struct {
+	ProductID         int64  `json:"product_id"`
+	Code              string `json:"code"`
+	FromCents         *int64 `json:"from_cents,omitempty"`
+	ToCents           *int64 `json:"to_cents,omitempty"`
+	AvailableQuantity *int   `json:"available_quantity,omitempty"`
+}
+
 // Failure is an error that knows how it should be rendered.
 type Failure struct {
-	Status   int
-	Code     Code
-	Message  string
-	Details  []Detail
-	Missing  string // permission key, for PERMISSION_DENIED (contract: PermissionError)
-	RetryIn  int    // seconds, for RATE_LIMITED
-	internal error  // logged, never serialized
+	Status       int
+	Code         Code
+	Message      string
+	Details      []Detail
+	Insufficient []InsufficientItem // STOCK_INSUFFICIENT
+	StaleLines   []StaleLine        // QUOTE_STALE
+	Missing      string             // permission key, for PERMISSION_DENIED (contract: PermissionError)
+	RetryIn      int                // seconds, for RATE_LIMITED
+	internal     error              // logged, never serialized
 }
 
 func (f Failure) Error() string {
@@ -157,8 +176,10 @@ type Envelope struct {
 	// No omitempty here on purpose: the contract types `details` as an array, and a client
 	// that writes error.details.forEach() must not crash on the failures that carry no
 	// specifics. Together with Write's nil-to-empty coercion, the field is always present.
-	Details       []Detail `json:"details"`
-	CorrelationID string   `json:"correlation_id"`
+	Details       []Detail           `json:"details"`
+	Insufficient  []InsufficientItem `json:"insufficient,omitempty"` // StockConflict.STOCK_INSUFFICIENT
+	StaleLines    []StaleLine        `json:"stale_lines,omitempty"`  // StockConflict.QUOTE_STALE
+	CorrelationID string             `json:"correlation_id"`
 	// MissingPermission is emitted for PERMISSION_DENIED, matching the contract's
 	// PermissionError so a client can diagnose a role gap without reading server logs.
 	MissingPermission string `json:"missing_permission,omitempty"`
@@ -175,8 +196,39 @@ func EnvelopeFor(f Failure, correlationID string) Envelope {
 		Code:              f.Code,
 		Message:           f.Message,
 		Details:           details,
+		Insufficient:      f.Insufficient,
+		StaleLines:        f.StaleLines,
 		CorrelationID:     correlationID,
 		MissingPermission: f.Missing,
+	}
+}
+
+// StockInsufficient builds a 409 STOCK_INSUFFICIENT conflict with the offending products.
+func StockInsufficient(items []InsufficientItem) Failure {
+	return Failure{
+		Status:       http.StatusConflict,
+		Code:         CodeStockInsufficient,
+		Message:      "One or more products do not have enough stock.",
+		Insufficient: items,
+	}
+}
+
+// QuoteStale builds a 409 QUOTE_STALE conflict with the re-priced lines to confirm.
+func QuoteStale(lines []StaleLine) Failure {
+	return Failure{
+		Status:     http.StatusConflict,
+		Code:       CodeQuoteStale,
+		Message:    "Prices changed since the quote was created. Review the updated lines and confirm.",
+		StaleLines: lines,
+	}
+}
+
+// IdempotencyConflict builds a 409 IDEMPOTENCY_KEY_CONFLICT.
+func IdempotencyConflict(msg string) Failure {
+	return Failure{
+		Status:  http.StatusConflict,
+		Code:    CodeIdempotencyConflict,
+		Message: msg,
 	}
 }
 

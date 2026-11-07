@@ -26,6 +26,7 @@ import (
 	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/httpauth"
 	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/identity"
 	identitypg "github.com/Apollo-otete/Naojaretailshop/backend-go/internal/identity/postgres"
+	inventorypg "github.com/Apollo-otete/Naojaretailshop/backend-go/internal/inventory/postgres"
 	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/observability"
 	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/ordering"
 	orderingpg "github.com/Apollo-otete/Naojaretailshop/backend-go/internal/ordering/postgres"
@@ -146,15 +147,23 @@ func run() error {
 		return fmt.Errorf("shopping service: %w", err)
 	}
 
-	// Ordering adapters.
+	// Ordering + P0 checkout adapters (quotes, idempotent placement, stock reservation).
 	orderStore, err := orderingpg.New(pg.Pool())
 	if err != nil {
 		return fmt.Errorf("ordering store: %w", err)
+	}
+	invStore, err := inventorypg.New(pg.Pool())
+	if err != nil {
+		return fmt.Errorf("inventory store: %w", err)
 	}
 	ord, err := ordering.NewService(ordering.Deps{
 		Orders:     orderStore,
 		Products:   catStore,
 		Carts:      shopStore,
+		Quotes:     orderStore,
+		Idem:       orderStore,
+		Settings:   orderStore,
+		Inventory:  invStore,
 		Authorizer: authz.RBAC{Logger: l},
 		Tx:         orderingpg.NewTx(pg.Pool()),
 		Audit:      auditWriter,
@@ -183,6 +192,7 @@ func run() error {
 		Identity:  ident,
 		Catalogue: cat,
 		Shopping:  shop,
+		Checkout:  ord,
 		Ordering:  ord,
 
 		LegacyOrderStore: orderStore,

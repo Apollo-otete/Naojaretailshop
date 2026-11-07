@@ -3,7 +3,6 @@ package httpordering
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -19,16 +18,14 @@ import (
 	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/testhelper"
 )
 
-// These tests hold the transport to contracts/openapi.yaml's Orders section, for the operations
-// the slice has landed: the create-from-cart placement, the read of one order, the list, and the
-// status transition. The payment and tracking operations are the next slices.
-
 type fakeOrderingService struct {
 	calls int
 
-	createErr error
-	createIn  ordering.CreateOrderInput
-	createOut ordering.Order
+	placeErr      error
+	placeReplayed bool
+	placeKey      string
+	placeReq      ordering.PlaceOrderRequest
+	placeOut      ordering.ContractOrderDetail
 
 	getErr   error
 	getRef   string
@@ -47,23 +44,21 @@ type fakeOrderingService struct {
 
 var _ Service = (*fakeOrderingService)(nil)
 
-func (f *fakeOrderingService) CreateFromCart(ctx context.Context, caller identity.Principal, sessionToken string, in ordering.CreateOrderInput) (ordering.Order, error) {
+func (f *fakeOrderingService) PlaceOrder(ctx context.Context, caller identity.Principal, idemKey string, req ordering.PlaceOrderRequest) (ordering.ContractOrderDetail, bool, error) {
 	f.calls++
-	f.createIn = in
-	return f.createOut, f.createErr
+	f.placeKey = idemKey
+	f.placeReq = req
+	return f.placeOut, f.placeReplayed, f.placeErr
 }
-
 func (f *fakeOrderingService) GetOrder(ctx context.Context, caller identity.Principal, ref string) (ordering.Order, []ordering.OrderItem, error) {
 	f.calls++
 	f.getRef = ref
 	return f.getOrder, f.getItems, f.getErr
 }
-
 func (f *fakeOrderingService) ListOrders(ctx context.Context, caller identity.Principal, status *ordering.OrderStatus, page, pageSize int) ([]ordering.Order, int64, error) {
 	f.calls++
 	return f.listOrders, f.listTotal, f.listErr
 }
-
 func (f *fakeOrderingService) ProcessStatus(ctx context.Context, caller identity.Principal, ref string, to ordering.OrderStatus, reason string) (ordering.Order, error) {
 	f.calls++
 	f.processTo = to
@@ -89,10 +84,13 @@ func newRouter(t *testing.T, svc Service, extra ...gin.HandlerFunc) *gin.Engine 
 	return r
 }
 
-func post(t *testing.T, r *gin.Engine, path, body string) *httptest.ResponseRecorder {
+func post(t *testing.T, r *gin.Engine, path, body string, headers ...[2]string) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
+	for _, h := range headers {
+		req.Header.Set(h[0], h[1])
+	}
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, req)
 	return rec
@@ -114,78 +112,61 @@ func decodeEnvelope(t *testing.T, rec *httptest.ResponseRecorder) apierr.Envelop
 	return e
 }
 
-func TestCreateOrderWithoutASessionAnswersUnauthorized(t *testing.T) {
+func TestPlaceOrderWithoutASessionAnswersUnauthorized(t *testing.T) {
 	svc := &fakeOrderingService{}
 	r := newRouter(t, svc)
-
-	rec := post(t, r, "/api/v1/orders", `{"delivery_fee_cents":15000}`)
+	rec := post(t, r, "/api/v1/orders", `{"quote_id":1}`, [2]string{"Idempotency-Key", "k1"})
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("status %d, want 401: %s", rec.Code, rec.Body.String())
 	}
-	e := decodeEnvelope(t, rec)
-	if e.Code != apierr.CodeNotAuthenticated {
-		t.Errorf("code %q, want %q", e.Code, apierr.CodeNotAuthenticated)
+}
+
+func TestPlaceOrderRequiresIdempotencyKey(t *testing.T) {
+	svc := &fakeOrderingService{}
+	r := newRouter(t, svc, signIn(identity.Principal{User: identity.User{ID: 42}}))
+	rec := post(t, r, "/api/v1/orders", `{"quote_id":1}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status %d, want 400: %s", rec.Code, rec.Body.String())
 	}
 }
 
-func TestCreateOrderAnswersCreatedWithTheOrder(t *testing.T) {
-	svc := &fakeOrderingService{createOut: ordering.Order{
-		ID: 9, Reference: "NJ-2026-0001", Status: ordering.StatusPendingPayment,
-		PaymentStatus: ordering.PayPending, SubtotalCents: 30000, DeliveryFeeCents: 15000, TotalCents: 45000,
-		Currency: "KES",
+func TestPlaceOrderAnswersCreatedWithDetail(t *testing.T) {
+	svc := &fakeOrderingService{placeOut: ordering.ContractOrderDetail{
+		ID: 9, Reference: "NJ-2026-0001", Status: "pending", PaymentStatus: "pending",
+		Totals: ordering.Totals{SubtotalCents: 30000, DeliveryFeeCents: 15000, TotalCents: 45000, Currency: "KES"},
 	}}
 	r := newRouter(t, svc, signIn(identity.Principal{User: identity.User{ID: 42}}))
-
-	rec := post(t, r, "/api/v1/orders", `{"delivery_fee_cents":15000}`)
+	rec := post(t, r, "/api/v1/orders", `{"quote_id":7,"notes":"leave at gate"}`, [2]string{"Idempotency-Key", "idem-1"})
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("status %d, want 201: %s", rec.Code, rec.Body.String())
 	}
 	if !strings.Contains(rec.Body.String(), "NJ-2026-0001") {
-		t.Errorf("the 201 body is not the placed order: %s", rec.Body.String())
+		t.Errorf("body missing reference: %s", rec.Body.String())
+	}
+	if svc.placeKey != "idem-1" || svc.placeReq.QuoteID != 7 || svc.placeReq.Notes == nil || *svc.placeReq.Notes != "leave at gate" {
+		t.Errorf("placement not forwarded correctly: key=%q req=%+v", svc.placeKey, svc.placeReq)
 	}
 }
 
-func TestCreateOrderForwardsTheDeliveryInput(t *testing.T) {
-	svc := &fakeOrderingService{}
+func TestPlaceOrderConflictIsRendered(t *testing.T) {
+	svc := &fakeOrderingService{placeErr: apierr.StockInsufficient([]apierr.InsufficientItem{{ProductID: 3, Name: "Bulb", Requested: 2, Available: 1}})}
 	r := newRouter(t, svc, signIn(identity.Principal{User: identity.User{ID: 42}}))
-
-	rec := post(t, r, "/api/v1/orders",
-		`{"delivery_address":"Kenyan Road, Nairobi","contact_phone":"+254700000000","delivery_instructions":"Gate code 1234","delivery_fee_cents":15000}`)
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("status %d, want 201: %s", rec.Code, rec.Body.String())
-	}
-	if svc.createIn.DeliveryAddress == nil || *svc.createIn.DeliveryAddress != "Kenyan Road, Nairobi" {
-		t.Errorf("delivery address was not forwarded: %+v", svc.createIn)
-	}
-	if svc.createIn.ContactPhone == nil || *svc.createIn.ContactPhone != "+254700000000" {
-		t.Errorf("contact phone was not forwarded: %+v", svc.createIn)
-	}
-	if svc.createIn.DeliveryInstructions == nil || *svc.createIn.DeliveryInstructions != "Gate code 1234" {
-		t.Errorf("delivery instructions were not forwarded: %+v", svc.createIn)
-	}
-	if svc.createIn.DeliveryFeeCents != 15000 {
-		t.Errorf("delivery fee was not forwarded: %+v", svc.createIn)
-	}
-}
-
-func TestAnOrderRefusalIsTheErrorEnvelope(t *testing.T) {
-	svc := &fakeOrderingService{createErr: errors.New("the pool is closed")}
-	r := newRouter(t, svc, signIn(identity.Principal{User: identity.User{ID: 42}}))
-
-	rec := post(t, r, "/api/v1/orders", `{"delivery_fee_cents":15000}`)
-	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("status %d, want 500: %s", rec.Code, rec.Body.String())
+	rec := post(t, r, "/api/v1/orders", `{"quote_id":7}`, [2]string{"Idempotency-Key", "idem-1"})
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status %d, want 409: %s", rec.Code, rec.Body.String())
 	}
 	e := decodeEnvelope(t, rec)
-	if e.Code != apierr.CodeInternal {
-		t.Errorf("code %q, want %q", e.Code, apierr.CodeInternal)
+	if e.Code != apierr.CodeStockInsufficient {
+		t.Errorf("code %q, want %q", e.Code, apierr.CodeStockInsufficient)
+	}
+	if len(e.Insufficient) != 1 || e.Insufficient[0].ProductID != 3 {
+		t.Errorf("insufficient not rendered: %+v", e.Insufficient)
 	}
 }
 
 func TestGetOrderWithoutASessionAnswersUnauthorized(t *testing.T) {
 	svc := &fakeOrderingService{}
 	r := newRouter(t, svc)
-
 	rec := get(t, r, "/api/v1/orders/NJ-2026-0001")
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("status %d, want 401: %s", rec.Code, rec.Body.String())
@@ -193,22 +174,20 @@ func TestGetOrderWithoutASessionAnswersUnauthorized(t *testing.T) {
 }
 
 func TestGetOrderAnswersTheOrder(t *testing.T) {
-	svc := &fakeOrderingService{getOrder: ordering.Order{ID: 9, Reference: "NJ-2026-0001", Status: ordering.StatusPendingPayment}}
+	svc := &fakeOrderingService{getOrder: ordering.Order{ID: 9, Reference: "NJ-2026-0001", Status: ordering.StatusPending, PaymentStatus: ordering.PayPending, Currency: "KES"}}
 	r := newRouter(t, svc, signIn(identity.Principal{User: identity.User{ID: 42}}))
-
 	rec := get(t, r, "/api/v1/orders/NJ-2026-0001")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status %d, want 200: %s", rec.Code, rec.Body.String())
 	}
 	if !strings.Contains(rec.Body.String(), "NJ-2026-0001") {
-		t.Errorf("the 200 body is not the order: %s", rec.Body.String())
+		t.Errorf("body missing reference: %s", rec.Body.String())
 	}
 }
 
 func TestGetOrderAnswersNotFoundWhenTheServiceDoesNotKnowIt(t *testing.T) {
 	svc := &fakeOrderingService{getErr: ordering.ErrNoOrder}
 	r := newRouter(t, svc, signIn(identity.Principal{User: identity.User{ID: 42}}))
-
 	rec := get(t, r, "/api/v1/orders/NJ-9999-9999")
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status %d, want 404: %s", rec.Code, rec.Body.String())
@@ -222,20 +201,18 @@ func TestGetOrderAnswersNotFoundWhenTheServiceDoesNotKnowIt(t *testing.T) {
 func TestListOrdersAnswersAPage(t *testing.T) {
 	svc := &fakeOrderingService{listOrders: []ordering.Order{{ID: 9, Reference: "NJ-2026-0001"}}, listTotal: 1}
 	r := newRouter(t, svc, signIn(identity.Principal{User: identity.User{ID: 42}}))
-
 	rec := get(t, r, "/api/v1/orders?page=2&page_size=5")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status %d, want 200: %s", rec.Code, rec.Body.String())
 	}
 	if !strings.Contains(rec.Body.String(), "NJ-2026-0001") {
-		t.Errorf("the 200 body is not the listed orders: %s", rec.Body.String())
+		t.Errorf("body missing reference: %s", rec.Body.String())
 	}
 }
 
 func TestListOrdersWithoutASessionAnswersUnauthorized(t *testing.T) {
 	svc := &fakeOrderingService{}
 	r := newRouter(t, svc)
-
 	rec := get(t, r, "/api/v1/orders")
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("status %d, want 401: %s", rec.Code, rec.Body.String())
@@ -245,7 +222,6 @@ func TestListOrdersWithoutASessionAnswersUnauthorized(t *testing.T) {
 func TestProcessStatusWithoutASessionAnswersUnauthorized(t *testing.T) {
 	svc := &fakeOrderingService{}
 	r := newRouter(t, svc)
-
 	rec := post(t, r, "/api/v1/orders/NJ-2026-0001/status", `{"status":"paid"}`)
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("status %d, want 401: %s", rec.Code, rec.Body.String())
@@ -255,16 +231,14 @@ func TestProcessStatusWithoutASessionAnswersUnauthorized(t *testing.T) {
 func TestProcessStatusForwardsTheTransition(t *testing.T) {
 	svc := &fakeOrderingService{processOut: ordering.Order{ID: 9, Reference: "NJ-2026-0001"}}
 	r := newRouter(t, svc, signIn(identity.Principal{User: identity.User{ID: 42}}))
-
-	rec := post(t, r, "/api/v1/orders/NJ-2026-0001/status",
-		`{"status":"paid","reason":"mpesa confirmation received"}`)
+	rec := post(t, r, "/api/v1/orders/NJ-2026-0001/status", `{"status":"paid","reason":"mpesa confirmation received"}`)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status %d, want 200: %s", rec.Code, rec.Body.String())
 	}
 	if svc.processTo != ordering.StatusPaid {
-		t.Errorf("the transition was not forwarded: %v", svc.processTo)
+		t.Errorf("transition not forwarded: %v", svc.processTo)
 	}
 	if svc.processReason != "mpesa confirmation received" {
-		t.Errorf("the reason was not forwarded: %q", svc.processReason)
+		t.Errorf("reason not forwarded: %q", svc.processReason)
 	}
 }

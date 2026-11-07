@@ -6,8 +6,8 @@ import (
 	"errors"
 	"io"
 	"log/slog"
-	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -20,7 +20,8 @@ import (
 )
 
 type Service interface {
-	CreateFromCart(ctx context.Context, caller identity.Principal, sessionToken string, in ordering.CreateOrderInput) (ordering.Order, error)
+	// Contract P0: idempotent order placement from a quote.
+	PlaceOrder(ctx context.Context, caller identity.Principal, idemKey string, req ordering.PlaceOrderRequest) (ordering.ContractOrderDetail, bool, error)
 	GetOrder(ctx context.Context, caller identity.Principal, ref string) (ordering.Order, []ordering.OrderItem, error)
 	ListOrders(ctx context.Context, caller identity.Principal, status *ordering.OrderStatus, page, pageSize int) ([]ordering.Order, int64, error)
 	ProcessStatus(ctx context.Context, caller identity.Principal, ref string, to ordering.OrderStatus, reason string) (ordering.Order, error)
@@ -33,7 +34,7 @@ type Deps struct {
 }
 
 func Mount(r gin.IRouter, d Deps) {
-	r.POST("/orders", createOrder(d))
+	r.POST("/orders", placeOrder(d))
 	r.GET("/orders", listOrders(d))
 	r.GET("/orders/:reference", getOrder(d))
 	r.POST("/orders/:reference/status", processStatus(d))
@@ -53,42 +54,30 @@ func caller(c *gin.Context) (identity.Principal, bool) {
 	return identity.PrincipalFrom(c.Request.Context())
 }
 
-func sessionToken(c *gin.Context) string {
-	if v, err := c.Cookie("naoja_cart"); err == nil && v != "" {
-		return v
-	}
-	if v := c.GetHeader("X-Cart-Session"); v != "" {
-		return v
-	}
-	return ""
-}
-
-func createOrder(d Deps) gin.HandlerFunc {
+func placeOrder(d Deps) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		p, ok := caller(c)
 		if !ok {
 			httpjson.Write(c, d.Logger, apierr.Unauthorized("Sign in to place an order."))
 			return
 		}
-		var in struct {
-			DeliveryAddress      *string `json:"delivery_address"`
-			ContactPhone         *string `json:"contact_phone"`
-			DeliveryInstructions *string `json:"delivery_instructions"`
-			DeliveryFeeCents     int64   `json:"delivery_fee_cents"`
+		idemKey := strings.TrimSpace(c.GetHeader("Idempotency-Key"))
+		if idemKey == "" {
+			httpjson.Write(c, d.Logger, apierr.BadRequest("Idempotency-Key header is required."))
+			return
 		}
-		if err := decode(c, &in); err != nil {
+		var req ordering.PlaceOrderRequest
+		if err := decode(c, &req); err != nil {
 			httpjson.Fail(c, d.Logger, err)
 			return
 		}
-		o, err := d.Ordering.CreateFromCart(c.Request.Context(), p, sessionToken(c), ordering.CreateOrderInput{
-			DeliveryAddress: in.DeliveryAddress, ContactPhone: in.ContactPhone,
-			DeliveryInstructions: in.DeliveryInstructions, DeliveryFeeCents: in.DeliveryFeeCents,
-		})
+		detail, replayed, err := d.Ordering.PlaceOrder(c.Request.Context(), p, idemKey, req)
 		if err != nil {
 			httpjson.Fail(c, d.Logger, err)
 			return
 		}
-		httpjson.Created(c, orderViewOf(o, nil))
+		_ = replayed // same semantic response; 201 is fine for idempotent replay in this API
+		httpjson.Created(c, detail)
 	}
 }
 
@@ -108,7 +97,7 @@ func getOrder(d Deps) gin.HandlerFunc {
 			httpjson.Fail(c, d.Logger, err)
 			return
 		}
-		httpjson.OK(c, orderViewOf(o, items))
+		httpjson.OK(c, ordering.ContractDetail(o, items))
 	}
 }
 
@@ -163,39 +152,6 @@ func processStatus(d Deps) gin.HandlerFunc {
 	}
 }
 
-type orderView struct {
-	ID                   int64                  `json:"id"`
-	Reference            string                 `json:"reference"`
-	Status               ordering.OrderStatus   `json:"status"`
-	PaymentStatus        ordering.PaymentStatus `json:"payment_status"`
-	SubtotalCents        int64                  `json:"subtotal_cents"`
-	DeliveryFeeCents     int64                  `json:"delivery_fee_cents"`
-	TotalCents           int64                  `json:"total_cents"`
-	Currency             string                 `json:"currency"`
-	DeliveryAddress      *string                `json:"delivery_address"`
-	ContactPhone         *string                `json:"contact_phone"`
-	DeliveryInstructions *string                `json:"delivery_instructions"`
-	ExpiresAt            *time.Time             `json:"expires_at"`
-	CreatedAt            time.Time              `json:"created_at"`
-	UpdatedAt            time.Time              `json:"updated_at"`
-	PaidAt               *time.Time             `json:"paid_at"`
-	CancelledAt          *time.Time             `json:"cancelled_at"`
-	Items                []ordering.OrderItem   `json:"items"`
-}
-
-func orderViewOf(o ordering.Order, items []ordering.OrderItem) orderView {
-	if items == nil {
-		items = []ordering.OrderItem{}
-	}
-	return orderView{
-		ID: o.ID, Reference: o.Reference, Status: o.Status, PaymentStatus: o.PaymentStatus,
-		SubtotalCents: o.SubtotalCents, DeliveryFeeCents: o.DeliveryFeeCents, TotalCents: o.TotalCents,
-		Currency: o.Currency, DeliveryAddress: o.DeliveryAddress, ContactPhone: o.ContactPhone,
-		DeliveryInstructions: o.DeliveryInstructions, ExpiresAt: o.ExpiresAt, CreatedAt: o.CreatedAt,
-		UpdatedAt: o.UpdatedAt, PaidAt: o.PaidAt, CancelledAt: o.CancelledAt, Items: items,
-	}
-}
-
 func orderMapOf(o ordering.Order) map[string]any {
 	return map[string]any{
 		"id": o.ID, "reference": o.Reference, "status": o.Status, "payment_status": o.PaymentStatus,
@@ -216,4 +172,4 @@ func queryInt(c *gin.Context, key string, def int) int {
 	return n
 }
 
-var _ = http.StatusOK
+var _ = time.Now

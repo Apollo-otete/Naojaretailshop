@@ -141,11 +141,18 @@ func TestDownOneStepRollsBackExactlyOneMigration(t *testing.T) {
 		t.Fatalf("down 1: %v", err)
 	}
 
-	// The head is now 0007 (commerce orders), which owns the order tables — so rolling back one
-	// step must remove them, while the cart tables added by 0006 and the catalogue tables added
-	// by 0005 and the conditions column added by 0004 must survive.
-	if tableExists(t, conn, "commerce", "orders") {
-		t.Error("commerce.orders survived a one-step rollback of the head migration")
+	// The head is 0008 (checkout/inventory/idempotency). Rolling back one step must remove its
+	// objects while everything owned by 0007 and earlier survives.
+	for _, gone := range [][2]string{
+		{"inventory", "inventory"}, {"inventory", "stock_reservations"},
+		{"commerce", "checkout_quotes"}, {"commerce", "order_idempotency_keys"},
+	} {
+		if tableExists(t, conn, gone[0], gone[1]) {
+			t.Errorf("%s.%s survived a one-step rollback of migration 0008", gone[0], gone[1])
+		}
+	}
+	if !tableExists(t, conn, "commerce", "orders") {
+		t.Error("a one-step rollback removed commerce.orders, which 0007 owns")
 	}
 	if !tableExists(t, conn, "commerce", "carts") {
 		t.Error("a one-step rollback removed commerce.carts, which 0006 owns")
