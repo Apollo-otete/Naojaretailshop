@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"net/http"
 	"strconv"
 	"strings"
 	"time"
@@ -19,22 +20,30 @@ import (
 	"github.com/Apollo-otete/Naojaretailshop/backend-go/internal/port"
 )
 
+type TrackLimiter interface {
+	Allow(key string, now time.Time) bool
+	RetryAfter(key string, now time.Time) time.Duration
+}
+
 type Service interface {
 	// Contract P0: idempotent order placement from a quote.
 	PlaceOrder(ctx context.Context, caller identity.Principal, idemKey string, req ordering.PlaceOrderRequest) (ordering.ContractOrderDetail, bool, error)
 	GetOrder(ctx context.Context, caller identity.Principal, ref string) (ordering.Order, []ordering.OrderItem, error)
 	ListOrders(ctx context.Context, caller identity.Principal, status *ordering.OrderStatus, page, pageSize int) ([]ordering.Order, int64, error)
 	ProcessStatus(ctx context.Context, caller identity.Principal, ref string, to ordering.OrderStatus, reason string) (ordering.Order, error)
+	TrackOrder(ctx context.Context, ref, phone string) (ordering.OrderTracking, error)
 }
 
 type Deps struct {
-	Ordering   Service
-	Authorizer port.Authorizer
-	Logger     *slog.Logger
+	Ordering     Service
+	Authorizer   port.Authorizer
+	Logger       *slog.Logger
+	TrackLimiter TrackLimiter
 }
 
 func Mount(r gin.IRouter, d Deps) {
 	r.POST("/orders", placeOrder(d))
+	r.POST("/orders/track", trackOrder(d)) // public, verified, rate-limited (G3) - before :reference GET ambiguity irrelevant (different method/shape)
 	r.GET("/orders", listOrders(d))
 	r.GET("/orders/:reference", getOrder(d))
 	r.POST("/orders/:reference/status", processStatus(d))
@@ -173,3 +182,34 @@ func queryInt(c *gin.Context, key string, def int) int {
 }
 
 var _ = time.Now
+
+func trackOrder(d Deps) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if d.TrackLimiter != nil && !d.TrackLimiter.Allow(c.ClientIP(), time.Now()) {
+			retry := int(d.TrackLimiter.RetryAfter(c.ClientIP(), time.Now()).Seconds())
+			if retry < 1 {
+				retry = 1
+			}
+			f := apierr.New(http.StatusTooManyRequests, apierr.CodeRateLimited, "Too many requests have been made from this address. Try again later.")
+			f.RetryIn = retry
+			httpjson.Write(c, d.Logger, f)
+			return
+		}
+		var in ordering.TrackRequest
+		if err := decode(c, &in); err != nil {
+			httpjson.Fail(c, d.Logger, err)
+			return
+		}
+		if strings.TrimSpace(in.Reference) == "" || strings.TrimSpace(in.Phone) == "" {
+			httpjson.Write(c, d.Logger, apierr.NotFound("order"))
+			return
+		}
+		out, err := d.Ordering.TrackOrder(c.Request.Context(), in.Reference, in.Phone)
+		if err != nil {
+			// Indistinguishable from "no such order" (anti-enumeration).
+			httpjson.Write(c, d.Logger, apierr.NotFound("order"))
+			return
+		}
+		httpjson.OK(c, out)
+	}
+}

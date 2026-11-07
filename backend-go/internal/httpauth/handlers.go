@@ -200,6 +200,8 @@ func registrationFailure(err error) error {
 		return apierr.Conflict(apierr.CodeConflict,
 			"An account already uses this phone number.",
 			apierr.Detail{Field: "phone", Issue: "already registered"})
+	case errors.Is(err, identity.ErrBreachedPassword):
+		return apierr.Validation(apierr.Detail{Field: "password", Issue: err.Error()})
 	}
 	return err
 }
@@ -321,7 +323,7 @@ func changePasswordFailure(err error) error {
 		return nil
 	case errors.Is(err, identity.ErrSamePassword):
 		return apierr.Validation(apierr.Detail{Field: "new_password", Issue: "must differ from the current password"})
-	case errors.Is(err, identity.ErrPasswordTooShort), errors.Is(err, identity.ErrPasswordTooLong):
+	case errors.Is(err, identity.ErrPasswordTooShort), errors.Is(err, identity.ErrPasswordTooLong), errors.Is(err, identity.ErrBreachedPassword):
 		return apierr.Validation(apierr.Detail{Field: "new_password", Issue: err.Error()})
 	case errors.Is(err, identity.ErrInvalidCredentials):
 		return apierr.Validation(apierr.Detail{Field: "current_password", Issue: "is not your current password"})

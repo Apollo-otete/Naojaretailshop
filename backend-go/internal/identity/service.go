@@ -48,6 +48,12 @@ func (p LoginPolicy) Validate() error {
 	return nil
 }
 
+// BreachedPasswordChecker reports whether a candidate password is known-compromised.
+// Optional; when nil, no breach check is performed (hook for HIBP/k-anonymity integration).
+type BreachedPasswordChecker interface {
+	IsBreached(ctx context.Context, password string) (bool, error)
+}
+
 // Deps is the service's whole world. A struct rather than eight positional arguments means
 // adding a port cannot silently reorder two time.Duration values.
 type Deps struct {
@@ -61,6 +67,8 @@ type Deps struct {
 	Login    LoginPolicy
 	Clock    func() time.Time
 	Logger   *slog.Logger
+
+	BreachCheck BreachedPasswordChecker
 }
 
 // Service is the application layer of the Identity context: the operations the contract
@@ -137,8 +145,30 @@ const CustomerRoleKey = "customer"
 // Set-Cookie). The account row, the customer role and the session are one transaction: a
 // half-created account with no role is a support ticket, and one with a session but no role is
 // worse.
+func (s *Service) checkBreached(ctx context.Context, password string) error {
+	if s.d.BreachCheck == nil {
+		return nil
+	}
+	breached, err := s.d.BreachCheck.IsBreached(ctx, password)
+	if err != nil {
+		// Fail open on checker errors? Safer to fail closed for security-sensitive paths; but
+		// without a configured reliable checker we must not block users due to infra issues.
+		if s.d.Logger != nil {
+			s.d.Logger.Warn("breached-password check failed; allowing by default", "error", err)
+		}
+		return nil
+	}
+	if breached {
+		return ErrBreachedPassword
+	}
+	return nil
+}
+
 func (s *Service) Register(ctx context.Context, in RegisterInput) (Authenticated, error) {
 	if err := CheckPasswordPolicy(in.Password); err != nil {
+		return Authenticated{}, err
+	}
+	if err := s.checkBreached(ctx, in.Password); err != nil {
 		return Authenticated{}, err
 	}
 	hash, err := s.d.Hasher.Hash(in.Password)
@@ -311,6 +341,9 @@ func (s *Service) Logout(ctx context.Context, p Principal) error {
 // inventory records at auth.js:122, where an environment value worked as a permanent master key.
 func (s *Service) ChangePassword(ctx context.Context, p Principal, current, next string) error {
 	if err := CheckPasswordPolicy(next); err != nil {
+		return err
+	}
+	if err := s.checkBreached(ctx, next); err != nil {
 		return err
 	}
 	if current == next {

@@ -58,6 +58,10 @@ type Deps struct {
 	// unthrottled login.
 	AuthRateLimit *httpauth.RateLimiter
 
+	// TrackRateLimit rate-limits public verified order tracking (anti-enumeration). Optional; a
+	// safe default is applied when nil.
+	TrackRateLimit *httpauth.RateLimiter
+
 	// Catalogue is the use-case surface behind the /products and /categories operations.
 	Catalogue httpcatalogue.Service
 
@@ -208,11 +212,16 @@ func New(d Deps) (*gin.Engine, error) {
 		})
 	}
 
+	trackLimiter := d.TrackRateLimit
+	if trackLimiter == nil {
+		trackLimiter = httpauth.NewRateLimiter(15, time.Minute)
+	}
 	if d.Ordering != nil {
 		httpordering.Mount(api, httpordering.Deps{
-			Ordering:   d.Ordering,
-			Authorizer: d.Authorizer,
-			Logger:     d.Logger,
+			Ordering:     d.Ordering,
+			Authorizer:   d.Authorizer,
+			Logger:       d.Logger,
+			TrackLimiter: trackLimiter,
 		})
 	}
 

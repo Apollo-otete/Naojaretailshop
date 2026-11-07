@@ -566,3 +566,108 @@ func (s *Service) ProcessStatus(ctx context.Context, caller identity.Principal, 
 func timePtr(t time.Time) *time.Time { return &t }
 
 var _ = rand.Intn
+
+// ExpirePendingOrders releases reservations and marks expired any orders past expires_at that are
+// still awaiting payment. Intended as a sweeper/cron hook; idempotent and safe to run repeatedly.
+func (s *Service) ExpirePendingOrders(ctx context.Context, limit int) (int, error) {
+	if s.d.Orders == nil {
+		return 0, nil
+	}
+	now := s.d.Clock()
+	orders, err := s.d.Orders.ListExpiredPending(ctx, now, limit)
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, o := range orders {
+		err := s.d.Tx.RunInTx(ctx, func(ctx context.Context) error {
+			if s.d.Inventory != nil {
+				_ = s.d.Inventory.ReleaseOrder(ctx, o.ID, "reservation_expired")
+			}
+			at := now
+			return s.d.Orders.UpdateStatus(ctx, o.ID, StatusExpired, nil, &at)
+		})
+		if err != nil {
+			if s.d.Logger != nil {
+				s.d.Logger.Warn("expire pending order failed", "order_id", o.ID, "error", err)
+			}
+			continue
+		}
+		_ = s.d.Orders.AddStatusHistory(ctx, &OrderStatusHistory{
+			OrderID: o.ID, ToStatus: StatusExpired, Reason: strPtr("reservation expired"), OccurredAt: now,
+		})
+		n++
+	}
+	return n, nil
+}
+
+func strPtr(s string) *string { return &s }
+
+func normalizeTrackPhone(s string) string {
+	s = strings.TrimSpace(s)
+	s = strings.TrimPrefix(s, "+")
+	if strings.HasPrefix(s, "0") && len(s) == 10 {
+		s = "254" + s[1:]
+	}
+	// keep digits only
+	b := make([]byte, 0, len(s))
+	for i := 0; i < len(s); i++ {
+		if s[i] >= '0' && s[i] <= '9' {
+			b = append(b, s[i])
+		}
+	}
+	return string(b)
+}
+
+func phonesMatch(stored, provided string) bool {
+	a, b := normalizeTrackPhone(stored), normalizeTrackPhone(provided)
+	if a == "" || b == "" {
+		return false
+	}
+	return a == b
+}
+
+// TrackOrder verifies reference+phone and returns a minimal non-leaking projection.
+// Any mismatch is indistinguishable from "no such order".
+func (s *Service) TrackOrder(ctx context.Context, ref, phone string) (OrderTracking, error) {
+	ref = strings.TrimSpace(ref)
+	if ref == "" || strings.TrimSpace(phone) == "" {
+		return OrderTracking{}, ErrNoOrder
+	}
+	o, err := s.d.Orders.OrderByReference(ctx, ref)
+	if err != nil {
+		if errors.Is(err, ErrNoOrder) {
+			return OrderTracking{}, ErrNoOrder
+		}
+		return OrderTracking{}, ErrNoOrder // anti-enumeration on unexpected errors too? keep safe
+	}
+	storedPhone := ""
+	if o.ContactPhone != nil {
+		storedPhone = *o.ContactPhone
+	}
+	if !phonesMatch(storedPhone, phone) {
+		return OrderTracking{}, ErrNoOrder
+	}
+	hist, _ := s.d.Orders.ListStatusHistory(ctx, o.ID)
+	timeline := make([]TrackTimelineEntry, 0, len(hist)+1)
+	if len(hist) == 0 {
+		timeline = append(timeline, TrackTimelineEntry{Status: string(o.Status), OccurredAt: o.CreatedAt})
+	} else {
+		for _, h := range hist {
+			timeline = append(timeline, TrackTimelineEntry{Status: string(h.ToStatus), OccurredAt: h.OccurredAt})
+		}
+	}
+	method := "delivery"
+	if o.FulfilmentMethod != nil && *o.FulfilmentMethod != "" {
+		method = *o.FulfilmentMethod
+	}
+	return OrderTracking{
+		Reference:        o.Reference,
+		Status:           string(o.Status),
+		PaymentStatus:    string(o.PaymentStatus),
+		FulfilmentMethod: method,
+		PlacedAt:         o.CreatedAt,
+		ExpectedWindow:   nil,
+		Timeline:         timeline,
+	}, nil
+}

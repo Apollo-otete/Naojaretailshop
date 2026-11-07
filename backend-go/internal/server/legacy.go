@@ -44,6 +44,7 @@ func mountLegacy(r gin.IRouter, d Deps, cookie httpcookie.Session) {
 	r.POST("/orders", legacyCreateOrder(d))
 	r.GET("/orders", legacyBearerAuth(d), legacyListOrders(d))
 	r.GET("/orders/track", legacyTrackOrder(d))
+	r.POST("/orders/track", legacyTrackOrder(d)) // verified (ref+phone) per G3; POST preferred
 	r.PUT("/orders/:id", legacyBearerAuth(d), legacyUpdateOrder(d))
 
 	// Admin catalogue CRUD (legacy shapes)
@@ -70,10 +71,10 @@ func mountLegacy(r gin.IRouter, d Deps, cookie httpcookie.Session) {
 	r.POST("/contacts", legacyStubCreated(gin.H{"message": "Message sent."}))
 	r.PUT("/contacts/:id/read", legacyBearerAuth(d), legacyStubOK(gin.H{}))
 	r.POST("/upload", legacyBearerAuth(d), legacyUpload(d))
-	// M-Pesa compat stubs (no Daraja adapter yet) — frontend polls; return "pending/unavailable" shapes.
-	r.POST("/mpesa/stkpush", legacyStubOK(gin.H{"CheckoutRequestID": "", "MerchantRequestID": "", "ResponseDescription": "M-Pesa is not configured on this server."}))
-	r.POST("/mpesa/query", legacyStubOK(gin.H{"ResultCode": "1", "ResultDesc": "Not configured"}))
-	r.GET("/mpesa/order-status/:orderRef", legacyStubOK(gin.H{"payment_status": "pending", "status": "pending"}))
+	// M-Pesa compat: aligned to real flow when configured; safe/non-leaking when not.
+	r.POST("/mpesa/stkpush", legacyBearerAuth(d), legacyMpesaSTKPush(d))
+	r.POST("/mpesa/query", legacyBearerAuth(d), legacyMpesaQuery(d))
+	r.GET("/mpesa/order-status/:orderRef", legacyMpesaOrderStatus(d))
 }
 
 func legacyStubOK(payload any) gin.HandlerFunc {
@@ -557,20 +558,43 @@ func timePtr(t time.Time) *time.Time { return &t }
 func legacyTrackOrder(d Deps) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if d.Ordering == nil {
-			c.JSON(http.StatusNotFound, gin.H{"message": "Not found"})
+			c.JSON(http.StatusNotFound, gin.H{"message": "No matching order found. Please check your order reference and phone number."})
 			return
 		}
-		// Legacy is GET ?ref&phone; contract is POST with verification. Best-effort: if a signed-in
-		// caller exists try to read; otherwise refuse to leak by reference alone.
-		ref := c.Query("ref")
-		if ref == "" {
-			ref = c.Query("reference")
-		}
-		if ref == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"message": "Order reference and phone number are required"})
+		// Contract/verified flow: POST {reference, phone}
+		if c.Request.Method == http.MethodPost {
+			var in struct {
+				Reference string `json:"reference"`
+				Ref       string `json:"ref"`
+				Phone     string `json:"phone"`
+			}
+			_ = c.ShouldBindJSON(&in)
+			ref := strings.TrimSpace(in.Reference)
+			if ref == "" {
+				ref = strings.TrimSpace(in.Ref)
+			}
+			phone := strings.TrimSpace(in.Phone)
+			if ref == "" || phone == "" {
+				c.JSON(http.StatusNotFound, gin.H{"message": "No matching order found. Please check your order reference and phone number."})
+				return
+			}
+			out, err := d.Ordering.TrackOrder(c.Request.Context(), ref, phone)
+			if err != nil {
+				c.JSON(http.StatusNotFound, gin.H{"message": "No matching order found. Please check your order reference and phone number."})
+				return
+			}
+			c.JSON(http.StatusOK, out)
 			return
 		}
-		// Try to resolve via principal if present (Bearer)
+		// GET: only return details to the authenticated owner; never leak by reference alone.
+		ref := strings.TrimSpace(c.Query("ref"))
+		if ref == "" {
+			ref = strings.TrimSpace(c.Query("reference"))
+		}
+		if ref == "" {
+			c.JSON(http.StatusNotFound, gin.H{"message": "No matching order found. Please check your order reference and phone number."})
+			return
+		}
 		if h := c.GetHeader("Authorization"); strings.HasPrefix(h, "Bearer ") && d.Sessions != nil {
 			token := strings.TrimSpace(strings.TrimPrefix(h, "Bearer "))
 			if p, err := d.Sessions.Authenticate(c.Request.Context(), token); err == nil {
@@ -582,6 +606,90 @@ func legacyTrackOrder(d Deps) gin.HandlerFunc {
 			}
 		}
 		c.JSON(http.StatusNotFound, gin.H{"message": "No matching order found. Please check your order reference and phone number."})
+	}
+}
+
+func legacyMpesaSTKPush(d Deps) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if d.Payments == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"message": "M-Pesa is not configured on this server.", "ResponseDescription": "M-Pesa is not configured on this server."})
+			return
+		}
+		var in struct {
+			Phone       string `json:"phone"`
+			PhoneNumber string `json:"phoneNumber"`
+			OrderRef    string `json:"orderRef"`
+			Reference   string `json:"reference"`
+			OrderID     string `json:"orderId"`
+		}
+		if err := c.ShouldBindJSON(&in); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"message": "Invalid request body."})
+			return
+		}
+		phone := strings.TrimSpace(in.Phone)
+		if phone == "" {
+			phone = strings.TrimSpace(in.PhoneNumber)
+		}
+		ref := strings.TrimSpace(in.OrderRef)
+		if ref == "" {
+			ref = strings.TrimSpace(in.Reference)
+		}
+		if ref == "" {
+			ref = strings.TrimSpace(in.OrderID)
+		}
+		res, err := d.Payments.InitiateSTK(c.Request.Context(), ref, phone)
+		if err != nil {
+			if d.Logger != nil {
+				d.Logger.Warn("legacy mpesa stkpush failed", "error", err, "ref", ref)
+			}
+			// Preserve a safe, frontend-tolerant shape.
+			msg := "Could not initiate M-Pesa payment."
+			if fe, ok := err.(interface{ Error() string }); ok && fe != nil {
+				// avoid leaking internals; keep generic where appropriate
+				_ = fe
+			}
+			c.JSON(http.StatusBadRequest, gin.H{"message": msg, "ResponseDescription": msg, "error": msg})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"message":             res.CustomerMessage,
+			"ResponseDescription": res.CustomerMessage,
+			"CustomerMessage":     res.CustomerMessage,
+			"CheckoutRequestID":   res.CheckoutRequestID,
+			"MerchantRequestID":   res.Attempt.MerchantRequestID,
+			"order_reference":     ref,
+			"status":              "pending",
+		})
+	}
+}
+
+func legacyMpesaQuery(d Deps) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		// The legacy "query" endpoint was unsafe (state mutation by arbitrary callers). Do not
+		// mutate; return a safe status. Use the payment status endpoint for real state.
+		c.JSON(http.StatusOK, gin.H{"ResultCode": "1", "ResultDesc": "Use order payment status.", "message": "Not supported"})
+	}
+}
+
+func legacyMpesaOrderStatus(d Deps) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		ref := strings.TrimSpace(c.Param("orderRef"))
+		// Never leak by reference alone. Only the authenticated owner may see status.
+		if h := c.GetHeader("Authorization"); strings.HasPrefix(h, "Bearer ") && d.Sessions != nil && d.Ordering != nil {
+			token := strings.TrimSpace(strings.TrimPrefix(h, "Bearer "))
+			if p, err := d.Sessions.Authenticate(c.Request.Context(), token); err == nil {
+				if _, _, err := d.Ordering.GetOrder(c.Request.Context(), p, ref); err == nil && d.Payments != nil {
+					if pay, _, _, err := d.Payments.PaymentByOrderRef(c.Request.Context(), ref); err == nil {
+						c.JSON(http.StatusOK, gin.H{"payment_status": string(pay.Status), "status": string(pay.Status), "order_reference": ref})
+						return
+					}
+					c.JSON(http.StatusOK, gin.H{"payment_status": "pending", "status": "pending", "order_reference": ref})
+					return
+				}
+			}
+		}
+		// Indistinguishable non-leak response.
+		c.JSON(http.StatusNotFound, gin.H{"message": "No matching order found."})
 	}
 }
 func legacyListOrders(d Deps) gin.HandlerFunc {
