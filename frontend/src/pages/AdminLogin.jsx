@@ -67,10 +67,10 @@ export default function AdminLogin() {
           N
         </div>
         <h2 className="text-center text-2xl lg:text-3xl font-display font-extrabold text-gray-950 tracking-tight">
-          Naoja Executive Portal
+          Naoja Admin Console
         </h2>
         <p className="mt-2 text-center text-xs text-gray-500 font-medium">
-          Sign in to access Naoja Retail Operations & Business Intelligence
+          Authorised admin sign-in — separate from the storefront.
         </p>
       </div>
 
