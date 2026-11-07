@@ -67,11 +67,9 @@ function roleProfile(session) {
 }
 
 function canAccessTab(roleKey, tabId) {
+  // kept for backward-compat; callers now use permission-based gating via canPerm()
   if (roleKey === 'super_admin' || roleKey === 'admin_1_business') return true;
-  // Operations Admin (Admin 2): operational scope (no business analytics/forecast/targets)
-  if (roleKey === 'admin_2_operations') {
-    return !['sales_analytics', 'forecast'].includes(tabId);
-  }
+  if (roleKey === 'admin_2_operations') return !['sales_analytics', 'forecast'].includes(tabId);
   return ['overview', 'products', 'categories', 'orders'].includes(tabId);
 }
 
@@ -414,6 +412,8 @@ export default function AdminDashboard() {
 
   const handleProductSubmit = async (e) => {
     e.preventDefault();
+    const required = editingProduct ? 'catalogue.products.update' : 'catalogue.products.create';
+    if (!canPerm(required)) return;
     const payload = {
       name: productForm.name,
       slug: productForm.slug || productForm.name.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
@@ -477,6 +477,7 @@ export default function AdminDashboard() {
 
   const handleCategorySubmit = async (e) => {
     e.preventDefault();
+    if (!canPerm('catalogue.categories.manage')) return;
     const payload = {
       name: categoryForm.name,
       slug: categoryForm.slug || categoryForm.name.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
@@ -509,6 +510,7 @@ export default function AdminDashboard() {
 
   // Order Actions
   const handleUpdateOrderStatus = async (id, status) => {
+    if (!canPerm('ordering.orders.process') && !canPerm('ordering.orders.status.override')) return;
     try {
       const res = await api.admin.updateOrderStatus(id, status);
       const updatedList = orders.map(o => o.id === id ? res : o);
@@ -523,6 +525,7 @@ export default function AdminDashboard() {
   };
 
   const handleUpdateOrderPaymentStatus = async (id, paymentStatus) => {
+    if (!canPerm('payments.status.override')) return;
     try {
       const res = await api.admin.updateOrderPaymentStatus(id, paymentStatus);
       const updatedList = orders.map(o => o.id === id ? res : o);
@@ -538,6 +541,7 @@ export default function AdminDashboard() {
 
   // Review Actions
   const handleApproveReview = async (id) => {
+    if (!canPerm('engagement.reviews.moderate')) return;
     try {
       const res = await api.admin.approveReview(id);
       setReviews(reviews.map(r => r.id === id ? res : r));
@@ -547,6 +551,7 @@ export default function AdminDashboard() {
   };
 
   const handleRejectReview = async (id) => {
+    if (!canPerm('engagement.reviews.moderate')) return;
     if (!window.confirm('Delete/Reject this review?')) return;
     try {
       await api.admin.rejectReview(id);
@@ -558,6 +563,7 @@ export default function AdminDashboard() {
 
   // Message Actions
   const handleToggleMessageRead = async (msg) => {
+    if (!canPerm('engagement.inquiries.respond')) return;
     const updatedMessages = messages.map(m => m.id === msg.id ? { ...m, is_read: !m.is_read } : m);
     setMessages(updatedMessages);
     refreshAnalytics(products, orders, subscribers, updatedMessages);
@@ -644,6 +650,24 @@ export default function AdminDashboard() {
   const unacknowledgedAlertsCount = alertsData.filter(a => !a.acknowledged && (a.severity === 'critical' || a.severity === 'warning')).length;
   const profile = roleProfile(adminSession);
   const roleKey = profile.key;
+  const perms = (adminSession && (adminSession.permissions || adminSession.effective_permissions)) || [];
+  const canPerm = (key) => (perms || []).includes(key) || roleKey === 'super_admin';
+  const TAB_PERM = {
+    overview: 'analytics.dashboards.read.operational',
+    sales_analytics: 'analytics.dashboards.read.business',
+    forecast: 'analytics.forecasts.read',
+    inventory_intel: 'inventory.stock.read',
+    payment_health: 'payments.status.read',
+    fulfillment: 'fulfilment.assignments.read',
+    alerts: 'analytics.dashboards.read.operational',
+    products: 'catalogue.products.read.published',
+    categories: 'catalogue.categories.read',
+    orders: 'ordering.orders.read.all',
+    reviews: 'engagement.reviews.read.published',
+    messages: 'engagement.inquiries.read',
+    subscribers: 'engagement.subscribers.read',
+  };
+  const canViewTab = (id) => canPerm(TAB_PERM[id] || 'analytics.dashboards.read.operational');
 
   const biMenuItems = [
     { id: 'overview', label: 'Live Command', icon: Activity, liveDot: true },
@@ -653,7 +677,7 @@ export default function AdminDashboard() {
     { id: 'payment_health', label: 'M-Pesa Diagnostics', icon: CreditCard },
     { id: 'fulfillment', label: 'Logistics Funnel', icon: Truck },
     { id: 'alerts', label: 'Alerts Centre', icon: BellRing, badge: unacknowledgedAlertsCount ? unacknowledgedAlertsCount : null, badgeColor: 'bg-rose-600' }
-  ].filter((item) => canAccessTab(roleKey, item.id));
+  ].filter((item) => canViewTab(item.id));
 
   const storeMenuItems = [
     { id: 'products', label: 'Products', icon: ShoppingBag, badge: stats.lowStockCount ? stats.lowStockCount : null },
@@ -662,7 +686,7 @@ export default function AdminDashboard() {
     { id: 'reviews', label: 'Reviews', icon: Star, badge: reviews.filter(r => !r.is_approved).length ? reviews.filter(r => !r.is_approved).length : null },
     { id: 'messages', label: 'Inquiries', icon: MessageSquare, badge: stats.pendingMessagesCount ? stats.pendingMessagesCount : null },
     { id: 'subscribers', label: 'Subscribers', icon: Users }
-  ].filter((item) => canAccessTab(roleKey, item.id));
+  ].filter((item) => canViewTab(item.id));
 
   const visibleTabIds = [...biMenuItems, ...storeMenuItems].map((i) => i.id);
   useEffect(() => {
@@ -995,13 +1019,15 @@ export default function AdminDashboard() {
                       <h1 className="font-display text-2xl lg:text-3xl font-extrabold text-gray-950 tracking-tight">Product Catalogue</h1>
                       <p className="text-xs text-gray-500 mt-1">Manage catalog inventory, pricing, and stock availability.</p>
                     </div>
-                    <button
-                      onClick={() => handleOpenProductModal()}
-                      className="h-10 px-4 bg-brand-600 hover:bg-brand-700 text-white font-semibold text-xs rounded-xl flex items-center gap-2 transition-colors"
-                    >
-                      <Plus className="w-4.5 h-4.5" />
-                      Add Product
-                    </button>
+                    {canPerm('catalogue.products.create') && (
+                      <button
+                        onClick={() => handleOpenProductModal()}
+                        className="h-10 px-4 bg-brand-600 hover:bg-brand-700 text-white font-semibold text-xs rounded-xl flex items-center gap-2 transition-colors"
+                      >
+                        <Plus className="w-4.5 h-4.5" />
+                        Add Product
+                      </button>
+                    )}
                   </div>
 
                   {/* Search & Filter bar */}
@@ -1094,20 +1120,24 @@ export default function AdminDashboard() {
                                   </td>
                                   <td className="px-6 py-4 text-right">
                                     <div className="flex justify-end gap-2.5">
-                                      <button 
-                                        onClick={() => handleOpenProductModal(prod)}
-                                        className="p-1.5 text-gray-500 hover:text-brand-600 hover:bg-gray-100 rounded-lg transition-all"
-                                        title="Edit Product"
-                                      >
-                                        <Edit className="w-4 h-4" />
-                                      </button>
-                                      <button 
-                                        onClick={() => handleDeleteProduct(prod.id)}
-                                        className="p-1.5 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
-                                        title="Delete Product"
-                                      >
-                                        <Trash2 className="w-4 h-4" />
-                                      </button>
+                                      {canPerm('catalogue.products.update') && (
+                                        <button
+                                          onClick={() => handleOpenProductModal(prod)}
+                                          className="p-1.5 text-gray-500 hover:text-brand-600 hover:bg-gray-100 rounded-lg transition-all"
+                                          title="Edit Product"
+                                        >
+                                          <Edit className="w-4 h-4" />
+                                        </button>
+                                      )}
+                                      {canPerm('catalogue.products.archive') && (
+                                        <button
+                                          onClick={() => handleDeleteProduct(prod.id)}
+                                          className="p-1.5 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
+                                          title="Archive Product"
+                                        >
+                                          <Trash2 className="w-4 h-4" />
+                                        </button>
+                                      )}
                                     </div>
                                   </td>
                                 </tr>
@@ -1157,13 +1187,15 @@ export default function AdminDashboard() {
                       <h1 className="font-display text-2xl lg:text-3xl font-extrabold text-gray-950 tracking-tight">Category Catalog</h1>
                       <p className="text-xs text-gray-500 mt-1">Configure shop categories, icons, and product counts.</p>
                     </div>
-                    <button
-                      onClick={() => handleOpenCategoryModal()}
-                      className="h-10 px-4 bg-brand-600 hover:bg-brand-700 text-white font-semibold text-xs rounded-xl flex items-center gap-2 transition-colors"
-                    >
-                      <Plus className="w-4.5 h-4.5" />
-                      Add Category
-                    </button>
+                    {canPerm('catalogue.categories.manage') && (
+                      <button
+                        onClick={() => handleOpenCategoryModal()}
+                        className="h-10 px-4 bg-brand-600 hover:bg-brand-700 text-white font-semibold text-xs rounded-xl flex items-center gap-2 transition-colors"
+                      >
+                        <Plus className="w-4.5 h-4.5" />
+                        Add Category
+                      </button>
+                    )}
                   </div>
 
                   {/* Grid layout for categories */}
@@ -1182,18 +1214,22 @@ export default function AdminDashboard() {
                         </div>
 
                         <div className="flex gap-1.5 self-start">
-                          <button 
-                            onClick={() => handleOpenCategoryModal(cat)}
-                            className="p-1.5 text-gray-400 hover:text-brand-600 hover:bg-gray-50 rounded-lg"
-                          >
-                            <Edit className="w-4 h-4" />
-                          </button>
-                          <button 
-                            onClick={() => handleDeleteCategory(cat.id)}
-                            className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
+                          {canPerm('catalogue.categories.manage') && (
+                            <button
+                              onClick={() => handleOpenCategoryModal(cat)}
+                              className="p-1.5 text-gray-400 hover:text-brand-600 hover:bg-gray-50 rounded-lg"
+                            >
+                              <Edit className="w-4 h-4" />
+                            </button>
+                          )}
+                          {canPerm('catalogue.categories.delete') && (
+                            <button
+                              onClick={() => handleDeleteCategory(cat.id)}
+                              className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
                         </div>
                       </div>
                     ))}
@@ -1587,12 +1623,14 @@ export default function AdminDashboard() {
                   <select
                     value={selectedOrder.payment_status}
                     onChange={(e) => handleUpdateOrderPaymentStatus(selectedOrder.id, e.target.value)}
-                    className="w-full h-9 border border-gray-200 rounded-lg px-2 text-xs focus:border-brand-500 outline-none bg-white font-semibold"
+                    disabled={!canPerm('payments.status.override')}
+                    className="w-full h-9 border border-gray-200 rounded-lg px-2 text-xs focus:border-brand-500 outline-none bg-white font-semibold disabled:opacity-60 disabled:bg-gray-100"
                   >
                     <option value="pending">Pending</option>
                     <option value="paid">Paid</option>
                     <option value="failed">Failed</option>
                   </select>
+                  {!canPerm('payments.status.override') && <p className="text-[10px] text-gray-400 mt-1">Read-only — requires payments.status.override</p>}
                 </div>
               </div>
 
