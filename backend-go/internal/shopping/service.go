@@ -196,3 +196,17 @@ func (s *Service) RemoveItem(ctx context.Context, caller *identity.Principal, se
 	}
 	return s.d.Carts.RemoveItem(ctx, cart.ID, productID)
 }
+
+// ClearCart empties the caller's cart. Clearing is a write about the cart, so it carries the same
+// `shopping.cart.modify` key the add/remove paths use; guests clear their own session cart the
+// same way a signed-in caller clears theirs, and both answer "nothing was there" as success.
+func (s *Service) ClearCart(ctx context.Context, caller *identity.Principal, sessionToken string) error {
+	if err := s.authorize(ctx, caller, "shopping.cart.modify"); err != nil {
+		return err
+	}
+	cart, err := s.resolveCart(ctx, caller, sessionToken)
+	if err != nil {
+		return err
+	}
+	return s.d.Carts.ClearCart(ctx, cart.ID)
+}

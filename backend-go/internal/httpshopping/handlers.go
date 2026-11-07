@@ -23,6 +23,7 @@ type Service interface {
 	AddItem(ctx context.Context, caller *identity.Principal, sessionToken string, productID int64, qty int) error
 	UpdateItem(ctx context.Context, caller *identity.Principal, sessionToken string, productID int64, qty int) error
 	RemoveItem(ctx context.Context, caller *identity.Principal, sessionToken string, productID int64) error
+	ClearCart(ctx context.Context, caller *identity.Principal, sessionToken string) error
 }
 
 type Deps struct {
@@ -40,6 +41,7 @@ func Mount(r gin.IRouter, d Deps) {
 	r.POST("/cart/items", addItem(d))
 	r.PATCH("/cart/items/:product_id", updateItem(d))
 	r.DELETE("/cart/items/:product_id", removeItem(d))
+	r.DELETE("/cart", clearCart(d))
 }
 
 func decode(c *gin.Context, target any) error {
@@ -111,7 +113,9 @@ func addItem(d Deps) gin.HandlerFunc {
 			httpjson.Fail(c, d.Logger, err)
 			return
 		}
-		httpjson.OK(c, v)
+		// Contract 201: the add answered, and the whole cart came back with it, so the client never
+		// patches its own copy of the line it just added.
+		httpjson.Created(c, v)
 	}
 }
 
@@ -161,12 +165,22 @@ func removeItem(d Deps) gin.HandlerFunc {
 			httpjson.Fail(c, d.Logger, err)
 			return
 		}
-		v, err := d.Shopping.ViewCart(c.Request.Context(), callerPtr(c), sessionToken(c))
-		if err != nil {
+		// Contract 204: the line is gone, and the answer carries no body to clean up after.
+		httpjson.NoContent(c)
+	}
+}
+
+func clearCart(d Deps) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if err := d.Shopping.ClearCart(c.Request.Context(), callerPtr(c), sessionToken(c)); err != nil {
+			if errors.Is(err, shopping.ErrGuestSessionRequired) {
+				httpjson.Write(c, d.Logger, apierr.BadRequest("A cart session is required for guest carts."))
+				return
+			}
 			httpjson.Fail(c, d.Logger, err)
 			return
 		}
-		httpjson.OK(c, v)
+		httpjson.NoContent(c)
 	}
 }
 

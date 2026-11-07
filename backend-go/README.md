@@ -15,8 +15,12 @@ rules, the RBAC evaluator and its ownership conditions, the middleware chain tha
 the contract's five `/auth` operations on top of it. The catalogue half has now been built the same
 way and its tests are in: domain rules in `internal/catalogue`, store/service/transport wired
 through the ports, migrations 0005, and a handler suite that pins the mounted operation set to the
-contract's. The role-boundary suite (matrix B1–B13, B15) passes against PostgreSQL, and B14/B16/B17
-stay where the slices they need are not built yet. See *Deliberate state* below.
+contract's. The shopping half has now been built the same way too: the Commerce context's rules in
+`internal/shopping`, the driving adapter in `internal/httpshopping` — read, add, update, remove and
+clear a cart, with the guest session token the public operations run on — and a handler suite that
+pins the mounted operation set to the contract's. The role-boundary suite (matrix B1–B13, B15) passes
+against PostgreSQL, and B14/B16/B17 stay where the slices they need are not built yet. See *Deliberate
+state* below.
 
 Both criteria are checkable here:
 
@@ -116,6 +120,7 @@ trusting a checklist.
 | Logout is idempotent and leaks no session state (contract `/auth/logout`) | `httpauth.logout` answers 204 with or without a principal | `TestLogoutWithADeadOrAbsentCookieStillSucceeds` |
 | The cookie one route issues is the value the next route reads | `httpcookie` + `httpmw.Authenticate` + `httpauth.Mount` | `TestTheSessionOneRouteIssuesIsTheSessionTheNextRouteReads` |
 | Only the operations the contract documents are routed | `httpauth.Mount` | `TestTheMountedOperationsAreExactlyTheContractedOnes` |
+| Only the operations the contract documents are routed | `httpshopping.Mount` | `TestTheMountedOperationsAreExactlyTheContractedOnes` |
 | The public auth operations are throttled per client address | `httpauth.RateLimit`, `httpauth.RateLimiter` | `TestLoginAnswers429WhenThePerAddressLimitIsExceeded`, `TestRegisterIsThrottledPerAddress` |
 
 ---
@@ -133,9 +138,10 @@ ships by accident; DenyAll was its safe version, and it was replaced rather than
 
 Also not present, on purpose:
 
-- **Every business endpoint from the contract.** Cart, checkout, orders and payments are the next
-  slices, and `/auth/register`'s promise that "the guest cart held by this browser is merged into
-  the new account's cart" waits on the cart one.
+- **Every business endpoint from the contract.** Checkout, orders and payments are the next slices.
+  The cart is built — read, add, update, remove and clear under `/api/v1/cart`, on the guest session
+  token the public operations run on — but the `/auth/register` promise that "the guest cart held by
+  this browser is merged into the new account's cart" is not.
 - **The breached-password-list check** registration's contract text asks for. No ADR decides which
   provider answers it, and guessing one would put a third-party call inside account creation.
 - **A request body size limit.** Every `/auth` handler decodes the body it is given, so an oversized
