@@ -129,7 +129,7 @@
 
 ```
 Naojaretailshop/
-├── backend/
+├── backend-go/                  # Go (Gin) + PostgreSQL API — /api/v1 + legacy /api compat
 │   ├── src/
 │   │   ├── config/
 │   │   │   ├── db.js              # Connects to PostgreSQL & MongoDB
@@ -239,7 +239,7 @@ cd ../frontend && npm install
 
 ### Step 3 — Configure Environment Variables
 
-#### Backend (`backend/.env`)
+#### Backend (`backend-go/.env`)
 ```bash
 cd backend
 cp .env.example .env
@@ -377,7 +377,7 @@ ngrok http 5000
 # Output: https://abc123.ngrok-free.app -> http://localhost:5000
 ```
 
-Update `backend/.env` with the ngrok URL:
+Update `backend-go/.env` (and frontend `VITE_API_URL` as needed) for the public API URL:
 ```dotenv
 MPESA_BASE_URL=https://sandbox.safaricom.co.ke
 MPESA_SHORTCODE=174379

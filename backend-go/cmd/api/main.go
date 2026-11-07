@@ -185,6 +185,9 @@ func run() error {
 		Shopping:  shop,
 		Ordering:  ord,
 
+		LegacyOrderStore: orderStore,
+		LegacyOrderTx:    orderingpg.NewTx(pg.Pool()),
+
 		// ADR-019's per-address rate limit for the public auth operations, on the numbers the
 		// operator configured: enough attempts to stop a rotating attacker, few enough that a person
 		// who forgot their password is not locked out of their own account for the day.
