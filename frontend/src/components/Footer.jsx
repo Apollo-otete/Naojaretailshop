@@ -138,8 +138,6 @@ export default function Footer() {
             <span className="text-gray-600">Payment:</span>
             <span className="bg-emerald-900/50 text-emerald-400 px-2 py-0.5 rounded font-bold">M-Pesa</span>
             <span className="bg-gray-800 text-gray-400 px-2 py-0.5 rounded font-semibold">Cash</span>
-            <span className="text-gray-600 mx-1">|</span>
-            <Link to="/admin/login" className="text-gray-500 hover:text-brand-400 transition-colors">Admin</Link>
           </div>
         </div>
       </div>

@@ -11,12 +11,32 @@ export default function AdminLogin() {
   const navigate = useNavigate();
 
   React.useEffect(() => {
-    // Enforce fresh login: clean any prior session tokens when visiting login page
-    sessionStorage.removeItem('adminToken');
-    sessionStorage.removeItem('adminInfo');
-    localStorage.removeItem('adminToken');
-    localStorage.removeItem('adminInfo');
-  }, []);
+    let cancelled = false;
+    (async () => {
+      try {
+        const session = await api.auth.getSession();
+        if (cancelled) return;
+        const kind = session?.user?.account_kind || session?.user?.kind;
+        const roles = session?.roles || [];
+        const isAdmin = kind === 'admin' || roles.some((r) => ['admin_2_operations', 'admin_1_business', 'super_admin'].includes(r));
+        if (isAdmin) {
+          navigate('/admin', { replace: true });
+          return;
+        }
+      } catch {
+        // no valid session; show login
+      }
+      if (!cancelled) {
+        sessionStorage.removeItem('adminToken');
+        sessionStorage.removeItem('adminInfo');
+        localStorage.removeItem('adminToken');
+        localStorage.removeItem('adminInfo');
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [navigate]);
 
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -47,10 +67,10 @@ export default function AdminLogin() {
           N
         </div>
         <h2 className="text-center text-2xl lg:text-3xl font-display font-extrabold text-gray-950 tracking-tight">
-          Naoja Executive Portal
+          Naoja Admin Console
         </h2>
         <p className="mt-2 text-center text-xs text-gray-500 font-medium">
-          Sign in to access Naoja Retail Operations & Business Intelligence
+          Authorised admin sign-in — separate from the storefront.
         </p>
       </div>
 

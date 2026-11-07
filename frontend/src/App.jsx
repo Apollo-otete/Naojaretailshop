@@ -6,10 +6,17 @@ import ProductPage from './pages/ProductPage';
 import CartPage from './pages/CartPage.jsx';
 import CheckoutPage from './pages/CheckoutPage';
 import AccountPage from './pages/AccountPage';
-import AdminLogin from './pages/AdminLogin';
-import AdminDashboard from './pages/AdminDashboard';
+import AdminApp from './admin/AdminApp';
+
+function isAdminEntry() {
+  const p = window.location.pathname;
+  return p.startsWith('/admin') || p.startsWith('/console') || p.startsWith('/backoffice');
+}
 
 function App() {
+  if (isAdminEntry()) {
+    return <AdminApp />;
+  }
   return (
     <CartProvider>
       <BrowserRouter>
@@ -20,8 +27,7 @@ function App() {
           <Route path="/cart" element={<CartPage />} />
           <Route path="/checkout" element={<CheckoutPage />} />
           <Route path="/account" element={<AccountPage />} />
-          <Route path="/admin/login" element={<AdminLogin />} />
-          <Route path="/admin" element={<AdminDashboard />} />
+          <Route path="*" element={<HomePage />} />
         </Routes>
       </BrowserRouter>
     </CartProvider>
