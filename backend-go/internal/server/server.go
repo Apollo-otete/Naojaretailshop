@@ -49,7 +49,8 @@ type Deps struct {
 	// than by the composition root so that the middleware ordering below — authentication and
 	// CSRF ahead of every business route — is assembled in one place and cannot be recreated
 	// wrongly somewhere else.
-	Identity httpauth.Service
+	Identity   httpauth.Service
+	CartMerger httpauth.CartMerger
 
 	// AuthRateLimit is ADR-019's per-address rate limit for the public auth operations (register,
 	// login). It is optional here — the engine-level tests build an engine without the full
@@ -127,6 +128,7 @@ func New(d Deps) (*gin.Engine, error) {
 	r.Use(httpmw.Recover(d.Logger))
 	r.Use(httpmw.RequestID(d.Logger, d.Cfg.RequestIDTrust))
 	r.Use(httpmw.Access(d.Logger))
+	r.Use(httpmw.BodyLimit(10 << 20)) // 10 MiB safety net; handlers may tighten
 	r.Use(httpmw.CORS(d.Logger, d.Cfg.CORS.AllowedOrigins))
 
 	// Health is registered *before* the next two Use calls, and that is not incidental: Gin
@@ -172,6 +174,7 @@ func New(d Deps) (*gin.Engine, error) {
 		Logger:      d.Logger,
 		Cookie:      cookie,
 		RateLimiter: d.AuthRateLimit,
+		CartMerger:  d.CartMerger,
 	})
 
 	if catalogueSvc != nil {
