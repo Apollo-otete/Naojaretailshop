@@ -25,15 +25,15 @@ import {
   Send
 } from 'lucide-react';
 
-const DEFAULT_CATEGORIES = [
-  { id: 1, name: 'Mobile Phones', slug: 'mobile-phones', icon: '📱', color: 'bg-blue-50 text-blue-600' },
-  { id: 2, name: 'Solar & Renewable', slug: 'renewable-energy', icon: '☀️', color: 'bg-amber-50 text-amber-600' },
-  { id: 3, name: 'TVs & Audio Displays', slug: 'television-products', icon: '📺', color: 'bg-purple-50 text-purple-600' },
-  { id: 4, name: 'Fast Chargers & Cables', slug: 'charging-accessories', icon: '🔌', color: 'bg-emerald-50 text-emerald-600' },
-  { id: 5, name: 'Computers & Laptops', slug: 'computers-accessories', icon: '💻', color: 'bg-indigo-50 text-indigo-600' },
-  { id: 6, name: 'Electrical & Wiring', slug: 'electrical-products', icon: '⚡', color: 'bg-orange-50 text-orange-600' },
-  { id: 7, name: 'Security CCTV Systems', slug: 'security-products', icon: '🔒', color: 'bg-red-50 text-red-600' },
-  { id: 8, name: 'Audio & Bluetooth', slug: 'audio-devices', icon: '🎧', color: 'bg-pink-50 text-pink-600' },
+const CATEGORY_COLORS = [
+  'bg-blue-50 text-blue-600',
+  'bg-amber-50 text-amber-600',
+  'bg-purple-50 text-purple-600',
+  'bg-emerald-50 text-emerald-600',
+  'bg-indigo-50 text-indigo-600',
+  'bg-orange-50 text-orange-600',
+  'bg-red-50 text-red-600',
+  'bg-pink-50 text-pink-600',
 ];
 
 const HERO_SLIDES = [
@@ -73,7 +73,7 @@ const HERO_SLIDES = [
 ];
 
 export default function HomePage() {
-  const [categories, setCategories] = useState(DEFAULT_CATEGORIES);
+  const [categories, setCategories] = useState([]);
   const [products, setProducts] = useState([]);
   const [productPage, setProductPage] = useState(1);
   const [productPagination, setProductPagination] = useState({ total: 0, totalPages: 0 });
@@ -403,14 +403,14 @@ export default function HomePage() {
              ══════════════════════════════════════════════════════════════════════ */}
           <div className="bg-white p-4 rounded-xl border border-gray-200/80 shadow-sm">
             <div className="grid grid-cols-4 sm:grid-cols-8 gap-3 sm:gap-4 text-center">
-              {DEFAULT_CATEGORIES.map((item) => (
+              {categories.map((item, idx) => (
                 <Link
-                  key={item.id}
+                  key={item.id || item.slug || idx}
                   to={`/category/${item.slug}`}
                   className="flex flex-col items-center group cursor-pointer"
                 >
-                  <div className={`w-13 h-13 sm:w-16 sm:h-16 rounded-full flex items-center justify-center text-2xl sm:text-3xl ${item.color} shadow-sm group-hover:scale-110 group-hover:shadow-md transition-all duration-200 mb-1.5`}>
-                    {item.icon}
+                  <div className={`w-13 h-13 sm:w-16 sm:h-16 rounded-full flex items-center justify-center text-2xl sm:text-3xl ${item.color || CATEGORY_COLORS[idx % CATEGORY_COLORS.length]} shadow-sm group-hover:scale-110 group-hover:shadow-md transition-all duration-200 mb-1.5`}>
+                    {item.icon || '🛍️'}
                   </div>
                   <span className="text-[11px] sm:text-xs font-bold text-gray-800 group-hover:text-brand-600 transition-colors line-clamp-1">
                     {item.name}
