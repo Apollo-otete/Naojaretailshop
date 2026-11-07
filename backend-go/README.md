@@ -18,9 +18,10 @@ through the ports, migrations 0005, and a handler suite that pins the mounted op
 contract's. The shopping half has now been built the same way too: the Commerce context's rules in
 `internal/shopping`, the driving adapter in `internal/httpshopping` — read, add, update, remove and
 clear a cart, with the guest session token the public operations run on — and a handler suite that
-pins the mounted operation set to the contract's. The role-boundary suite (matrix B1–B13, B15) passes
-against PostgreSQL, and B14/B16/B17 stay where the slices they need are not built yet. See *Deliberate
-state* below.
+pins the mounted operation set to the contract's. The ordering half has now been tested the same way:
+the status vocabulary in `internal/ordering`, and the handler suites for the placement, read, list and
+status operations. The role-boundary suite (matrix B1–B13, B15) passes against PostgreSQL, and
+B14/B16/B17 stay where the slices they need are not built yet. See *Deliberate state* below.
 
 Both criteria are checkable here:
 
@@ -138,10 +139,11 @@ ships by accident; DenyAll was its safe version, and it was replaced rather than
 
 Also not present, on purpose:
 
-- **Every business endpoint from the contract.** Checkout, orders and payments are the next slices.
-  The cart is built — read, add, update, remove and clear under `/api/v1/cart`, on the guest session
-  token the public operations run on — but the `/auth/register` promise that "the guest cart held by
-  this browser is merged into the new account's cart" is not.
+- **Every business endpoint from the contract.** Checkout and payments are the next slices — quotes,
+  capture, refunds — and the `/auth/register` promise that "the guest cart held by this browser is
+  merged into the new account's cart" is not. The cart is built — read, add, update, remove and clear
+  under `/api/v1/cart` — and the order operations the contract describes beyond those (placement, read,
+  list, status) are under test in `internal/ordering`.
 - **The breached-password-list check** registration's contract text asks for. No ADR decides which
   provider answers it, and guessing one would put a third-party call inside account creation.
 - **A request body size limit.** Every `/auth` handler decodes the body it is given, so an oversized
