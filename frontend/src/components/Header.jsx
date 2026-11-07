@@ -270,12 +270,12 @@ export default function Header() {
 
                   <div className="p-3 bg-gray-50">
                     <Link
-                      to="/admin"
+                      to="/admin/login"
                       onClick={() => setCategoriesMenuOpen(false)}
                       className="flex items-center gap-2 text-xs font-bold text-brand-600 hover:underline"
                     >
                       <Shield className="w-3.5 h-3.5" />
-                      Admin Dashboard
+                      Admin Sign In
                     </Link>
                   </div>
                 </div>
@@ -383,7 +383,7 @@ export default function Header() {
                   Customer Support
                 </Link>
                 <Link
-                  to="/admin"
+                  to="/admin/login"
                   onClick={() => setMobileMenuOpen(false)}
                   className="flex items-center gap-2 px-3 py-2 text-sm font-bold text-brand-600 hover:bg-brand-50 rounded-lg"
                 >
