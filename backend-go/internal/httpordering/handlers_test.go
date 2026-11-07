@@ -40,9 +40,19 @@ type fakeOrderingService struct {
 	processTo     ordering.OrderStatus
 	processReason string
 	processOut    ordering.Order
+
+	trackOut ordering.OrderTracking
+	trackErr error
+	trackRef string
 }
 
 var _ Service = (*fakeOrderingService)(nil)
+
+func (f *fakeOrderingService) TrackOrder(ctx context.Context, ref, phone string) (ordering.OrderTracking, error) {
+	f.calls++
+	f.trackRef = ref
+	return f.trackOut, f.trackErr
+}
 
 func (f *fakeOrderingService) PlaceOrder(ctx context.Context, caller identity.Principal, idemKey string, req ordering.PlaceOrderRequest) (ordering.ContractOrderDetail, bool, error) {
 	f.calls++

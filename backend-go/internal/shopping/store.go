@@ -18,6 +18,8 @@ type CartStore interface {
 	ListItems(ctx context.Context, cartID int64) ([]CartItem, error)
 	ClearCart(ctx context.Context, cartID int64) error
 	DeleteCart(ctx context.Context, id int64) error
+	// MergeGuestIntoUser moves an unmerged guest cart into the user's cart (idempotent, caps qty at 999).
+	MergeGuestIntoUser(ctx context.Context, userID int64, sessionHash string) error
 }
 
 type Transactor interface {

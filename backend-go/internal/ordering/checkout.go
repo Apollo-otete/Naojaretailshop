@@ -260,3 +260,30 @@ func allowedNext(status string, fm *FulfilmentMethod) []string {
 		return []string{}
 	}
 }
+
+// TrackRequest is the verified public tracking input (POST, no session/CSRF).
+type TrackRequest struct {
+	Reference string `json:"reference"`
+	Phone     string `json:"phone"`
+}
+
+type TrackTimelineEntry struct {
+	Status     string    `json:"status"`
+	OccurredAt time.Time `json:"occurred_at"`
+}
+
+type TrackExpectedWindow struct {
+	Start *time.Time `json:"start"`
+	End   *time.Time `json:"end"`
+}
+
+// OrderTracking is the minimal, non-leaking projection (G3).
+type OrderTracking struct {
+	Reference        string               `json:"reference"`
+	Status           string               `json:"status"`
+	PaymentStatus    string               `json:"payment_status"`
+	FulfilmentMethod string               `json:"fulfilment_method"`
+	PlacedAt         time.Time            `json:"placed_at"`
+	ExpectedWindow   *TrackExpectedWindow `json:"expected_window"`
+	Timeline         []TrackTimelineEntry `json:"timeline"`
+}

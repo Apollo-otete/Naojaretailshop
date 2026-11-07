@@ -392,3 +392,55 @@ func (s *Store) IntSetting(ctx context.Context, key string, def int64) (int64, e
 	}
 	return n, nil
 }
+
+func (s *Store) ListExpiredPending(ctx context.Context, now time.Time, limit int) ([]ordering.Order, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	rows, err := s.exec(ctx).Query(ctx, `
+		SELECT `+orderColumns+` FROM commerce.orders
+		WHERE status IN ('pending','pending_payment') AND expires_at IS NOT NULL AND expires_at < $1
+		ORDER BY expires_at ASC LIMIT $2`, now, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []ordering.Order
+	for rows.Next() {
+		o, err := s.scanOrder(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, o)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) ListStatusHistory(ctx context.Context, orderID int64) ([]ordering.OrderStatusHistory, error) {
+	rows, err := s.exec(ctx).Query(ctx, `
+		SELECT id, order_id, from_status, to_status, reason, actor_id, occurred_at
+		FROM commerce.order_status_history WHERE order_id=$1 ORDER BY occurred_at ASC, id ASC`, orderID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []ordering.OrderStatusHistory
+	for rows.Next() {
+		var h ordering.OrderStatusHistory
+		var from, reason *string
+		var actor *int64
+		var to string
+		if err := rows.Scan(&h.ID, &h.OrderID, &from, &to, &reason, &actor, &h.OccurredAt); err != nil {
+			return nil, err
+		}
+		if from != nil {
+			f := *from
+			h.FromStatus = &f
+		}
+		h.ToStatus = ordering.OrderStatus(to)
+		h.Reason = reason
+		h.ActorID = actor
+		out = append(out, h)
+	}
+	return out, rows.Err()
+}

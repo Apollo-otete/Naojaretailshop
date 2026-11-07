@@ -3,8 +3,8 @@ import { Helmet } from 'react-helmet-async';
 
 export default function SEO({
   title,
-  description = 'Shop quality solar equipment, electronics, hardware, kitchenware and general merchandise at Naoja Ventures in Lurambi, Kakamega. Fast delivery & M-Pesa payments.',
-  image = 'https://images.unsplash.com/photo-1513094735237-8f2714d57c13?w=1200&h=630&fit=crop',
+  description = 'Shop quality electronics, solar equipment, hardware and home essentials at Naoja Ventures in Kakamega. Secure checkout and reliable service.',
+  image = '',
   url,
   type = 'website'
 }) {
@@ -25,15 +25,15 @@ export default function SEO({
       <meta property="og:type" content={type} />
       <meta property="og:title" content={siteTitle} />
       <meta property="og:description" content={description} />
-      <meta property="og:image" content={image} />
+      {image ? <meta property="og:image" content={image} /> : null}
       <meta property="og:url" content={currentUrl} />
       <meta property="og:site_name" content="Naoja Ventures" />
 
       {/* Twitter Cards */}
-      <meta name="twitter:card" content="summary_large_image" />
+      <meta name="twitter:card" content={image ? 'summary_large_image' : 'summary'} />
       <meta name="twitter:title" content={siteTitle} />
       <meta name="twitter:description" content={description} />
-      <meta name="twitter:image" content={image} />
+      {image ? <meta name="twitter:image" content={image} /> : null}
 
       {/* Canonical Link */}
       <link rel="canonical" href={currentUrl} />

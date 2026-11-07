@@ -208,12 +208,13 @@ func run() error {
 		// The same service behind both: the routes that issue a session and the middleware that
 		// reads one must be answering to one implementation, or a login and a request could
 		// disagree about what the same cookie means.
-		Identity:  ident,
-		Catalogue: cat,
-		Shopping:  shop,
-		Checkout:  ord,
-		Ordering:  ord,
-		Payments:  paySvc,
+		Identity:   ident,
+		CartMerger: shop,
+		Catalogue:  cat,
+		Shopping:   shop,
+		Checkout:   ord,
+		Ordering:   ord,
+		Payments:   paySvc,
 
 		LegacyOrderStore: orderStore,
 		LegacyOrderTx:    orderingpg.NewTx(pg.Pool()),

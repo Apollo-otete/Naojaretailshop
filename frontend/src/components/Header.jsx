@@ -19,24 +19,13 @@ import { useState, useEffect, useRef } from 'react';
 import { useCart } from '../lib/cart';
 import { api } from '../lib/api';
 
-const DEFAULT_CATEGORIES = [
-  { id: 1, name: 'Mobile Phones', slug: 'mobile-phones', icon: '📱' },
-  { id: 2, name: 'Audio Devices', slug: 'audio-devices', icon: '🎧' },
-  { id: 3, name: 'Television Products', slug: 'television-products', icon: '📺' },
-  { id: 4, name: 'Charging Accessories', slug: 'charging-accessories', icon: '🔌' },
-  { id: 5, name: 'Computers & Accessories', slug: 'computers-accessories', icon: '💻' },
-  { id: 6, name: 'Electrical Products', slug: 'electrical-products', icon: '⚡' },
-  { id: 7, name: 'Security Products', slug: 'security-products', icon: '🔒' },
-  { id: 8, name: 'Renewable Energy', slug: 'renewable-energy', icon: '☀️' },
-];
-
 export default function Header() {
   const navigate = useNavigate();
   const { itemCount, total } = useCart();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [categoriesMenuOpen, setCategoriesMenuOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [categories, setCategories] = useState(DEFAULT_CATEGORIES);
+  const [categories, setCategories] = useState([]);
   const dropdownRef = useRef(null);
 
   useEffect(() => {

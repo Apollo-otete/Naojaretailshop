@@ -51,6 +51,9 @@ var (
 	// caller that hands NewCustomer the password instead of password.Hash's output.
 	ErrPasswordHashRequired = errors.New("a new account needs a password hash, not a password")
 
+	// ErrBreachedPassword indicates the password appears in a known-breach corpus (hook; optional checker).
+	ErrBreachedPassword = errors.New("password has appeared in a data breach")
+
 	// ErrInvalidCredentials is the single answer given for "no such account" and "wrong
 	// password". Contract /auth/login: "Failures do not disclose whether the email exists."
 	ErrInvalidCredentials = errors.New("email or password is incorrect")

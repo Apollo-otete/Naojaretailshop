@@ -210,3 +210,15 @@ func (s *Service) ClearCart(ctx context.Context, caller *identity.Principal, ses
 	}
 	return s.d.Carts.ClearCart(ctx, cart.ID)
 }
+
+// MergeGuestIntoUser merges an unmerged guest cart (identified by raw session token) into the
+// authenticated user's cart. It is idempotent and safe to call when no guest cart exists.
+func (s *Service) MergeGuestIntoUser(ctx context.Context, userID int64, guestSessionToken string) error {
+	if userID <= 0 || strings.TrimSpace(guestSessionToken) == "" {
+		return nil
+	}
+	hash := HashToken(guestSessionToken)
+	return s.d.Tx.RunInTx(ctx, func(ctx context.Context) error {
+		return s.d.Carts.MergeGuestIntoUser(ctx, userID, hash)
+	})
+}

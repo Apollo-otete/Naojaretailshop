@@ -170,3 +170,64 @@ func (s *Store) DeleteCart(ctx context.Context, id int64) error {
 	_, err := s.exec(ctx).Exec(ctx, `DELETE FROM commerce.carts WHERE id = $1`, id)
 	return err
 }
+
+func (s *Store) MergeGuestIntoUser(ctx context.Context, userID int64, sessionHash string) error {
+	if sessionHash == "" || userID <= 0 {
+		return nil
+	}
+	// Resolve guest cart (unmerged, session-owned).
+	row := s.exec(ctx).QueryRow(ctx, `
+		SELECT `+cartColumns+` FROM commerce.carts
+		WHERE session_token_hash = $1 AND user_id IS NULL AND merged_into_cart_id IS NULL
+		FOR UPDATE`, sessionHash)
+	guest, err := s.scanCart(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("reading guest cart: %w", err)
+	}
+
+	// Resolve/create user cart.
+	var userCart shopping.Cart
+	row = s.exec(ctx).QueryRow(ctx, `SELECT `+cartColumns+` FROM commerce.carts WHERE user_id = $1 ORDER BY id DESC LIMIT 1 FOR UPDATE`, userID)
+	userCart, err = s.scanCart(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		uid := userID
+		userCart = shopping.Cart{UserID: &uid}
+		if err := s.CreateCart(ctx, &userCart); err != nil {
+			return err
+		}
+	} else if err != nil {
+		return fmt.Errorf("reading user cart: %w", err)
+	}
+	if guest.ID == userCart.ID {
+		return nil
+	}
+
+	// Merge items, capping at 999.
+	_, err = s.exec(ctx).Exec(ctx, `
+		INSERT INTO commerce.cart_items (cart_id, product_id, quantity, price_snapshot_cents, added_at_price_cents)
+		SELECT $2, product_id, quantity, price_snapshot_cents, added_at_price_cents
+		FROM commerce.cart_items WHERE cart_id = $1
+		ON CONFLICT (cart_id, product_id) DO UPDATE
+		SET quantity = LEAST(commerce.cart_items.quantity + EXCLUDED.quantity, 999),
+		    price_snapshot_cents = EXCLUDED.price_snapshot_cents,
+		    updated_at = now()`, guest.ID, userCart.ID)
+	if err != nil {
+		return fmt.Errorf("merging cart items: %w", err)
+	}
+
+	// Clear guest items and mark merged (neutralize session hash to prevent reuse).
+	if _, err := s.exec(ctx).Exec(ctx, `DELETE FROM commerce.cart_items WHERE cart_id = $1`, guest.ID); err != nil {
+		return err
+	}
+	_, err = s.exec(ctx).Exec(ctx, `
+		UPDATE commerce.carts SET merged_into_cart_id = $2, session_token_hash = NULL, updated_at = now()
+		WHERE id = $1`, guest.ID, userCart.ID)
+	if err != nil {
+		return err
+	}
+	_, _ = s.exec(ctx).Exec(ctx, `UPDATE commerce.carts SET updated_at = now() WHERE id = $1`, userCart.ID)
+	return nil
+}

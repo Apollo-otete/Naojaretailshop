@@ -153,11 +153,21 @@ func (s *Service) ProcessCallback(ctx context.Context, cb daraja.CallbackResult)
 	}
 
 	if !cb.Success() || cb.MpesaReceipt == "" {
-		// Failed/cancelled: if payment still pending, mark failed (best-effort). Do not consume.
-		if pay.Status == StatusPending {
+		// Failed/cancelled: mark failed and release reservation (idempotent). Never consume.
+		run := func(ctx context.Context) error {
 			_ = s.d.Store.FailPayment(ctx, pay.ID)
+			if s.d.OrderState != nil {
+				_ = s.d.OrderState.SetOrderPaymentState(ctx, pay.OrderID, "failed", "failed")
+			}
+			if s.d.Inventory != nil {
+				_ = s.d.Inventory.ReleaseOrder(ctx, pay.OrderID, "payment_failed_or_cancelled")
+			}
+			return nil
 		}
-		return nil
+		if s.d.Tx != nil {
+			return s.d.Tx.RunInTx(ctx, run)
+		}
+		return run(ctx)
 	}
 
 	// Verify amount when provided.
@@ -194,16 +204,25 @@ func (s *Service) ProcessCallback(ctx context.Context, cb daraja.CallbackResult)
 		if err := s.d.Store.SettlePayment(ctx, pay.ID, amountPaid, now, reconciliation); err != nil {
 			return err
 		}
-		if s.d.OrderState != nil && !reconciliation {
-			// Mark order confirmed/paid and consume reservation.
-			if err := s.d.OrderState.SetOrderPaymentState(ctx, pay.OrderID, "confirmed", "paid"); err != nil {
-				return err
+		if !reconciliation {
+			if s.d.OrderState != nil {
+				if err := s.d.OrderState.SetOrderPaymentState(ctx, pay.OrderID, "confirmed", "paid"); err != nil {
+					return err
+				}
 			}
 			if s.d.Inventory != nil {
 				if err := s.d.Inventory.ConsumeOrder(ctx, pay.OrderID); err != nil {
 					s.d.Logger.Error("consume reservation after payment failed", slog.Int64("order_id", pay.OrderID), slog.Any("err", err))
-					// do not fail the callback ack; reconciliation can fix
 				}
+			}
+		} else {
+			// Amount mismatch: record for reconciliation; release reservation to avoid oversell on
+			// unverified settlement, and mark payment/order for review.
+			if s.d.Inventory != nil {
+				_ = s.d.Inventory.ReleaseOrder(ctx, pay.OrderID, "payment_amount_mismatch_reconciliation")
+			}
+			if s.d.OrderState != nil {
+				_ = s.d.OrderState.SetOrderPaymentState(ctx, pay.OrderID, "pending_payment", "pending")
 			}
 		}
 		return nil
@@ -212,6 +231,15 @@ func (s *Service) ProcessCallback(ctx context.Context, cb daraja.CallbackResult)
 		return s.d.Tx.RunInTx(ctx, run)
 	}
 	return run(ctx)
+}
+
+// ReleaseReservationOnFailure releases any active reservation for an order (idempotent). Exposed
+// for sweeper/expiry hooks and operational use.
+func (s *Service) ReleaseReservationOnFailure(ctx context.Context, orderID int64, reason string) error {
+	if s.d.Inventory == nil {
+		return nil
+	}
+	return s.d.Inventory.ReleaseOrder(ctx, orderID, reason)
 }
 
 func (s *Service) PaymentByOrderRef(ctx context.Context, ref string) (Payment, []Attempt, []Transaction, error) {

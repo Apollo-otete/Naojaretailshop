@@ -38,6 +38,10 @@ type Service interface {
 	ChangePassword(ctx context.Context, p identity.Principal, current, next string) error
 }
 
+type CartMerger interface {
+	MergeGuestIntoUser(ctx context.Context, userID int64, guestSessionToken string) error
+}
+
 type Deps struct {
 	Identity   Service
 	Authorizer port.Authorizer
@@ -48,6 +52,10 @@ type Deps struct {
 	// the transport edge — a nil means the caller did not wire the auth surface — but the
 	// composition root always supplies one, so a deployment cannot quietly run an unwalled login.
 	RateLimiter *RateLimiter
+
+	// CartMerger merges a guest cart into the authenticated account on login/register (P1).
+	// Optional; failures are logged and do not block auth.
+	CartMerger CartMerger
 }
 
 // Mount registers the five contracted operations. The paths hang off the router the caller passes —
@@ -100,6 +108,26 @@ type changePasswordRequest struct {
 	NewPassword     string `json:"new_password"`
 }
 
+func guestCartToken(c *gin.Context) string {
+	if v, err := c.Cookie("naoja_cart"); err == nil && v != "" {
+		return v
+	}
+	return c.GetHeader("X-Cart-Session")
+}
+
+func mergeGuestCart(c *gin.Context, d Deps, userID int64) {
+	if d.CartMerger == nil || userID <= 0 {
+		return
+	}
+	tok := guestCartToken(c)
+	if tok == "" {
+		return
+	}
+	if err := d.CartMerger.MergeGuestIntoUser(c.Request.Context(), userID, tok); err != nil && d.Logger != nil {
+		d.Logger.Warn("guest cart merge failed", slog.Int64("user_id", userID), slog.Any("err", err))
+	}
+}
+
 func register(d Deps) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var in registerRequest
@@ -125,8 +153,7 @@ func register(d Deps) gin.HandlerFunc {
 			return
 		}
 
-		// Contract 201: the account is created *and* the caller is signed in, so the cookie is
-		// issued here and the body describes the session it authenticates.
+		mergeGuestCart(c, d, out.Principal.User.ID)
 		d.Cookie.Set(c.Writer, out.Session.Token)
 		httpjson.Created(c, sessionViewOf(out.Principal))
 	}
@@ -173,6 +200,8 @@ func registrationFailure(err error) error {
 		return apierr.Conflict(apierr.CodeConflict,
 			"An account already uses this phone number.",
 			apierr.Detail{Field: "phone", Issue: "already registered"})
+	case errors.Is(err, identity.ErrBreachedPassword):
+		return apierr.Validation(apierr.Detail{Field: "password", Issue: err.Error()})
 	}
 	return err
 }
@@ -196,6 +225,7 @@ func login(d Deps) gin.HandlerFunc {
 			return
 		}
 
+		mergeGuestCart(c, d, out.Principal.User.ID)
 		d.Cookie.Set(c.Writer, out.Session.Token)
 		httpjson.OK(c, sessionViewOf(out.Principal))
 	}
@@ -293,7 +323,7 @@ func changePasswordFailure(err error) error {
 		return nil
 	case errors.Is(err, identity.ErrSamePassword):
 		return apierr.Validation(apierr.Detail{Field: "new_password", Issue: "must differ from the current password"})
-	case errors.Is(err, identity.ErrPasswordTooShort), errors.Is(err, identity.ErrPasswordTooLong):
+	case errors.Is(err, identity.ErrPasswordTooShort), errors.Is(err, identity.ErrPasswordTooLong), errors.Is(err, identity.ErrBreachedPassword):
 		return apierr.Validation(apierr.Detail{Field: "new_password", Issue: err.Error()})
 	case errors.Is(err, identity.ErrInvalidCredentials):
 		return apierr.Validation(apierr.Detail{Field: "current_password", Issue: "is not your current password"})

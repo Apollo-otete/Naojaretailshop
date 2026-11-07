@@ -18,6 +18,10 @@ type OrderStore interface {
 	OrderItems(ctx context.Context, orderID int64) ([]OrderItem, error)
 	AddStatusHistory(ctx context.Context, h *OrderStatusHistory) error
 	UpdateStatus(ctx context.Context, id int64, status OrderStatus, paidAt, cancelledAt *time.Time) error
+	// ListExpiredPending returns orders that are awaiting payment and past expires_at (sweeper hook).
+	ListExpiredPending(ctx context.Context, now time.Time, limit int) ([]Order, error)
+	// ListStatusHistory returns status transitions for an order, oldest first.
+	ListStatusHistory(ctx context.Context, orderID int64) ([]OrderStatusHistory, error)
 }
 
 type QuoteStore interface {

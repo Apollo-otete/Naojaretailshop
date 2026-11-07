@@ -112,7 +112,7 @@ export default function AdminLogin() {
         </div>
         
         <p className="mt-6 text-center text-xs text-gray-500 font-medium">
-          Protected by AES-256 Encryption & JWT
+          Secure admin access
         </p>
       </div>
     </div>

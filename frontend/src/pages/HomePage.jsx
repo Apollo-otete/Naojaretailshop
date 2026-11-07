@@ -25,55 +25,52 @@ import {
   Send
 } from 'lucide-react';
 
-const DEFAULT_CATEGORIES = [
-  { id: 1, name: 'Mobile Phones', slug: 'mobile-phones', icon: '📱', color: 'bg-blue-50 text-blue-600' },
-  { id: 2, name: 'Solar & Renewable', slug: 'renewable-energy', icon: '☀️', color: 'bg-amber-50 text-amber-600' },
-  { id: 3, name: 'TVs & Audio Displays', slug: 'television-products', icon: '📺', color: 'bg-purple-50 text-purple-600' },
-  { id: 4, name: 'Fast Chargers & Cables', slug: 'charging-accessories', icon: '🔌', color: 'bg-emerald-50 text-emerald-600' },
-  { id: 5, name: 'Computers & Laptops', slug: 'computers-accessories', icon: '💻', color: 'bg-indigo-50 text-indigo-600' },
-  { id: 6, name: 'Electrical & Wiring', slug: 'electrical-products', icon: '⚡', color: 'bg-orange-50 text-orange-600' },
-  { id: 7, name: 'Security CCTV Systems', slug: 'security-products', icon: '🔒', color: 'bg-red-50 text-red-600' },
-  { id: 8, name: 'Audio & Bluetooth', slug: 'audio-devices', icon: '🎧', color: 'bg-pink-50 text-pink-600' },
+const CATEGORY_COLORS = [
+  'bg-blue-50 text-blue-600',
+  'bg-amber-50 text-amber-600',
+  'bg-purple-50 text-purple-600',
+  'bg-emerald-50 text-emerald-600',
+  'bg-indigo-50 text-indigo-600',
+  'bg-orange-50 text-orange-600',
+  'bg-red-50 text-red-600',
+  'bg-pink-50 text-pink-600',
 ];
 
 const HERO_SLIDES = [
   {
     id: 1,
-    badge: '🔥 PAYDAY SUPER SALE',
-    title: 'Smartphones & Solar Tech Deals',
-    subtitle: 'Power up your home & life with genuine electronics. Up to 40% OFF this week.',
-    tag: 'From KSh 1,299',
-    cta: 'Shop Mega Deals',
-    link: '#flash-sales',
+    badge: 'NEW ARRIVALS',
+    title: 'Electronics & Solar Solutions',
+    subtitle: 'Quality products for home and business, backed by reliable service.',
+    tag: 'Shop now',
+    cta: 'Browse Products',
+    link: '#all-products',
     bgGradient: 'from-[#e11d48] via-[#ea580c] to-[#f97316]',
-    image: 'https://images.unsplash.com/photo-1511707171634-5f897ff02aa9?w=600&auto=format&fit=crop&q=80',
   },
   {
     id: 2,
-    badge: '☀️ RENEWABLE ENERGY REVOLUTION',
-    title: 'High-Efficiency Solar Inverters & Panels',
-    subtitle: 'Zero power blackouts! Reliable solar solutions tailored for Kakamega homes & business premises.',
-    tag: 'Save up to 35%',
-    cta: 'Explore Solar Range',
+    badge: 'RENEWABLE ENERGY',
+    title: 'Solar Inverters & Panels',
+    subtitle: 'Explore dependable solar solutions for your needs.',
+    tag: 'Solar range',
+    cta: 'Explore Solar',
     link: '/category/renewable-energy',
     bgGradient: 'from-[#0f766e] via-[#0d9488] to-[#14b8a6]',
-    image: 'https://images.unsplash.com/photo-1509391365360-2e959784a276?w=600&auto=format&fit=crop&q=80',
   },
   {
     id: 3,
-    badge: '📲 INSTANT M-PESA CHECKOUT',
-    title: 'Order Fast, Pay Conveniently',
-    subtitle: 'Direct STK Push straight to your phone, or Buy Goods Till 4149288. Pick up ready in 1 hour!',
-    tag: 'Till: 4149288',
-    cta: 'Browse Catalog',
+    badge: 'SECURE CHECKOUT',
+    title: 'Order and Pay Securely',
+    subtitle: 'Convenient checkout with verified payment confirmation.',
+    tag: 'Secure',
+    cta: 'View Catalog',
     link: '#all-products',
     bgGradient: 'from-[#1e3a8a] via-[#2563eb] to-[#3b82f6]',
-    image: 'https://images.unsplash.com/photo-1556742049-0a67c5574f73?w=600&auto=format&fit=crop&q=80',
   }
 ];
 
 export default function HomePage() {
-  const [categories, setCategories] = useState(DEFAULT_CATEGORIES);
+  const [categories, setCategories] = useState([]);
   const [products, setProducts] = useState([]);
   const [productPage, setProductPage] = useState(1);
   const [productPagination, setProductPagination] = useState({ total: 0, totalPages: 0 });
@@ -270,11 +267,12 @@ export default function HomePage() {
                     index === currentSlide ? 'opacity-100 z-10 pointer-events-auto' : 'opacity-0 z-0 pointer-events-none'
                   }`}
                 >
-                  {/* Decorative background image overlay */}
-                  <div 
-                    className="absolute inset-0 opacity-15 mix-blend-overlay bg-cover bg-center pointer-events-none"
-                    style={{ backgroundImage: `url(${slide.image})` }}
-                  ></div>
+                  {slide.image ? (
+                    <div
+                      className="absolute inset-0 opacity-15 mix-blend-overlay bg-cover bg-center pointer-events-none"
+                      style={{ backgroundImage: `url(${slide.image})` }}
+                    ></div>
+                  ) : null}
 
                   <div className="relative z-10 space-y-3 max-w-md">
                     <span className="inline-block bg-white/20 backdrop-blur-sm text-white text-[11px] font-black uppercase tracking-wider px-3 py-1 rounded-full border border-white/30 shadow-sm">
@@ -403,14 +401,14 @@ export default function HomePage() {
              ══════════════════════════════════════════════════════════════════════ */}
           <div className="bg-white p-4 rounded-xl border border-gray-200/80 shadow-sm">
             <div className="grid grid-cols-4 sm:grid-cols-8 gap-3 sm:gap-4 text-center">
-              {DEFAULT_CATEGORIES.map((item) => (
+              {categories.map((item, idx) => (
                 <Link
-                  key={item.id}
+                  key={item.id || item.slug || idx}
                   to={`/category/${item.slug}`}
                   className="flex flex-col items-center group cursor-pointer"
                 >
-                  <div className={`w-13 h-13 sm:w-16 sm:h-16 rounded-full flex items-center justify-center text-2xl sm:text-3xl ${item.color} shadow-sm group-hover:scale-110 group-hover:shadow-md transition-all duration-200 mb-1.5`}>
-                    {item.icon}
+                  <div className={`w-13 h-13 sm:w-16 sm:h-16 rounded-full flex items-center justify-center text-2xl sm:text-3xl ${item.color || CATEGORY_COLORS[idx % CATEGORY_COLORS.length]} shadow-sm group-hover:scale-110 group-hover:shadow-md transition-all duration-200 mb-1.5`}>
+                    {item.icon || '🛍️'}
                   </div>
                   <span className="text-[11px] sm:text-xs font-bold text-gray-800 group-hover:text-brand-600 transition-colors line-clamp-1">
                     {item.name}

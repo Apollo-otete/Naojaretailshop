@@ -352,7 +352,7 @@ export default function AdminDashboard() {
       stock_quantity: parseInt(productForm.stock_quantity),
       category_id: parseInt(productForm.category_id),
       subcategory: productForm.subcategory,
-      images: productForm.image_url ? [productForm.image_url] : ['https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=600']
+      images: productForm.image_url ? [productForm.image_url] : []
     };
 
     try {
@@ -498,12 +498,6 @@ export default function AdminDashboard() {
       }
     } catch (err) {
       console.warn('Mark read API error:', err.message);
-    }
-    // Also update localStorage fallback
-    const db = JSON.parse(localStorage.getItem('naoja_db'));
-    if (db) {
-      db.messages = db.messages.map(m => m.id === msg.id ? { ...m, is_read: !msg.is_read } : m);
-      localStorage.setItem('naoja_db', JSON.stringify(db));
     }
   };
 
@@ -971,11 +965,17 @@ export default function AdminDashboard() {
                               return (
                                 <tr key={prod.id} className="hover:bg-gray-50 transition-colors">
                                   <td className="px-6 py-4 flex items-center gap-3.5 min-w-[280px]">
-                                    <img 
-                                      src={prod.images && prod.images[0] ? prod.images[0] : 'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=100'} 
-                                      alt="" 
-                                      className="w-12 h-12 object-cover rounded-lg border border-gray-100"
-                                    />
+                                    {prod.images && prod.images[0] ? (
+                                      <img
+                                        src={prod.images[0]}
+                                        alt=""
+                                        className="w-12 h-12 object-cover rounded-lg border border-gray-100"
+                                      />
+                                    ) : (
+                                      <div className="w-12 h-12 rounded-lg border border-gray-100 bg-gray-50 flex items-center justify-center text-gray-400 text-[10px] font-bold">
+                                        No img
+                                      </div>
+                                    )}
                                     <div>
                                       <p className="font-bold text-gray-900 text-sm">{prod.name}</p>
                                       <p className="text-[10px] text-gray-400 mt-0.5">{prod.slug}</p>
